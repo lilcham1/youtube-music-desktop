@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS = {
   minimizeToTray: true,
   closeToTray: true,
   startWithWindows: false,
+  volume: 50,
 };
 const iconPath = path.join(__dirname, 'icon.ico');
 
@@ -66,6 +67,9 @@ function saveSettings(next) {
   if (typeof next.startWithWindows === 'boolean') {
     settings.startWithWindows = next.startWithWindows;
     app.setLoginItemSettings({ openAtLogin: settings.startWithWindows, openAsHidden: true });
+  }
+  if (next.volume !== undefined && Number.isFinite(Number(next.volume))) {
+    settings.volume = Math.max(0, Math.min(100, Math.round(Number(next.volume))));
   }
   fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
   return settings;
@@ -239,7 +243,9 @@ function createMainWindow() {
   mainWindow.setBrowserView(playerView);
   sizePlayerView();
   playerView.webContents.loadURL(MUSIC_URL);
-  playerView.webContents.on('did-finish-load', () => { setTimeout(injectVolumeControl, 600); });
+  playerView.webContents.on('did-finish-load', () => {
+    setTimeout(() => { void setPlayerVolume(settings.volume); }, 600);
+  });
   playerView.webContents.on('media-started-playing', () => { void readActiveTrack(); });
   playerView.webContents.on('media-paused', () => {
     updatePlayback({ ...playback, playing: false });
@@ -269,7 +275,11 @@ ipcMain.on('window:maximize', () => {
   else mainWindow.maximize();
 });
 ipcMain.on('window:close', () => mainWindow?.close());
-ipcMain.on('volume:set', (_event, value) => { void setPlayerVolume(value); });
+ipcMain.on('volume:set', (_event, value) => {
+  const saved = saveSettings({ volume: value });
+  void setPlayerVolume(saved.volume);
+  mainWindow?.webContents.send('settings:changed', settingsSnapshot());
+});
 function updatePlayback(next) {
   const wasPlaying = playback.playing;
   const changedTrack = playback.title !== next.title || playback.artist !== next.artist;
@@ -381,6 +391,9 @@ async function injectVolumeControl() {
 async function setPlayerVolume(value) {
   if (!playerView || playerView.webContents.isDestroyed()) return;
   const volume = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  // A linear 1–4% gain is effectively silent on many speakers. Keep the
+  // numeric control intuitive while applying a gentle perceptual curve.
+  const playerVolume = volume === 0 ? 0 : Math.round(Math.pow(volume / 100, 0.7) * 100);
   try {
     await playerView.webContents.executeJavaScript(`(() => {
       const find = (selector, root = document) => {
@@ -393,8 +406,10 @@ async function setPlayerVolume(value) {
       };
       const slider = find('#volume-slider') || find('paper-slider#volume-slider') || find('input[type="range"]');
       const player = find('ytmusic-player-bar');
-      if (typeof player?.updateVolume === 'function') player.updateVolume(${volume});
-      else if (slider) { slider.value = ${volume}; slider.dispatchEvent(new Event('input', { bubbles: true })); slider.dispatchEvent(new Event('change', { bubbles: true })); }
+      const playerVolume = ${playerVolume};
+      if (typeof player?.updateVolume === 'function') player.updateVolume(playerVolume);
+      if (slider) { slider.value = playerVolume; slider.dispatchEvent(new Event('input', { bubbles: true })); slider.dispatchEvent(new Event('change', { bubbles: true })); }
+      find('video')?.volume = playerVolume / 100;
     })()`, true);
   } catch {}
 }
