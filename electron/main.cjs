@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const MUSIC_URL = 'https://music.youtube.com/';
+const RELEASES_URL = 'https://github.com/lilcham1/youtube-music-desktop/releases/latest';
 const DEFAULT_SETTINGS = {
   discordEnabled: false,
   discordAppId: '',
@@ -76,7 +77,11 @@ function saveSettings(next) {
 }
 
 function settingsSnapshot() {
-  return { ...settings, startWithWindows: app.getLoginItemSettings().openAtLogin };
+  return {
+    ...settings,
+    version: app.getVersion(),
+    startWithWindows: app.getLoginItemSettings().openAtLogin,
+  };
 }
 
 function showSettings(section = 'general') {
@@ -92,7 +97,7 @@ function showSettings(section = 'general') {
     parent: mainWindow,
     modal: true,
     width: 440,
-    height: 410,
+    height: 470,
     resizable: false,
     maximizable: false,
     title: section === 'discord' ? 'Discord Rich Presence' : 'YouTube Music Settings',
@@ -428,6 +433,7 @@ ipcMain.handle('settings:save', async (_event, next) => {
   return snapshot;
 });
 ipcMain.handle('settings:open-discord-portal', () => shell.openExternal('https://discord.com/developers/applications'));
+ipcMain.handle('updates:open-release', () => shell.openExternal(RELEASES_URL));
 ipcMain.on('settings:quit', () => app.quit());
 
 app.whenReady().then(() => {
