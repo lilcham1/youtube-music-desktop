@@ -45,14 +45,11 @@
     </main>
     <main id="discord" class="hidden">
       <h1>Discord Rich Presence</h1>
-      <p class="intro">Shows a status only while a song is actively playing.</p>
+      <p class="intro">Shows a status only while a song is actively playing. No Discord setup is required.</p>
       <section>
         <div class="row"><div><strong>Enable Rich Presence</strong><span class="hint">Displays song, artist, album, artwork, and elapsed time.</span></div><input id="discord-enabled" type="checkbox" aria-label="Enable Discord Rich Presence" /></div>
-        <label for="app-id">DISCORD APPLICATION ID</label>
-        <input id="app-id" type="text" placeholder="123456789012345678" autocomplete="off" />
-        <div class="spacer"></div>
       </section>
-      <footer><button id="portal" class="secondary">Discord Developer Portal</button><span id="discord-status"></span><button id="save-discord" class="primary">Save</button></footer>
+      <footer><span></span><span id="discord-status"></span><button id="save-discord" class="primary">Save</button></footer>
     </main>
     <script>
       const api = window.youtubeMusicSettings;
@@ -65,7 +62,6 @@
         document.querySelector('#minimize-to-tray').checked = Boolean(settings.minimizeToTray);
         document.querySelector('#close-to-tray').checked = Boolean(settings.closeToTray);
         document.querySelector('#discord-enabled').checked = Boolean(settings.discordEnabled);
-        document.querySelector('#app-id').value = settings.discordAppId || '';
         document.querySelector('#version').textContent = 'Installed version ' + (settings.version || 'unknown') + '. Opens GitHub to download the newest installer.';
       });
 
@@ -79,13 +75,10 @@
       });
       document.querySelector('#quit').addEventListener('click', api.quit);
       document.querySelector('#check-updates').addEventListener('click', api.openLatestRelease);
-      document.querySelector('#portal').addEventListener('click', api.openDiscordPortal);
       document.querySelector('#save-discord').addEventListener('click', async () => {
         const enabled = document.querySelector('#discord-enabled').checked;
-        const appId = document.querySelector('#app-id').value.trim();
-        if (enabled && !appId) { status.textContent = 'Enter an Application ID first.'; return; }
         try {
-          await api.save({ discordEnabled: enabled, discordAppId: appId });
+          await api.save({ discordEnabled: enabled });
           status.textContent = enabled ? 'Enabled' : 'Disabled';
         } catch { status.textContent = 'Discord is not available.'; }
       });
