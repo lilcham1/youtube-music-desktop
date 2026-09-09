@@ -1,0 +1,10 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/
+src/
+edge-extension/
+index.html
+tsconfig.json
+tsconfig.node.json
+vite.config.ts

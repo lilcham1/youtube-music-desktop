@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YouTube Music Settings</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, "Segoe UI", Arial, sans-serif; }
+      body { margin:0; min-height:100vh; background:#171717; color:#f6f6f6; }
+      main { padding:28px; }
+      h1 { margin:0 0 7px; font-size:21px; letter-spacing:-.4px; }
+      .intro { margin:0; color:#aaa; font-size:13px; line-height:1.5; }
+      section { margin-top:24px; overflow:hidden; border:1px solid #303030; border-radius:12px; background:#1e1e1e; }
+      .row { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:16px; }
+      .row + .row { border-top:1px solid #303030; }
+      strong { display:block; font-size:14px; }
+      .hint { display:block; max-width:290px; margin-top:4px; color:#a5a5a5; font-size:12px; line-height:1.4; }
+      input[type=checkbox] { width:40px; height:22px; margin:0; accent-color:#ff4e4e; }
+      label { display:block; padding:0 16px; color:#c4c4c4; font-size:10px; font-weight:700; letter-spacing:.8px; }
+      input[type=text] { box-sizing:border-box; display:block; width:100%; margin-top:7px; padding:11px; border:1px solid #3e3e3e; border-radius:8px; outline:0; background:#111; color:#fff; font:13px ui-monospace, Consolas, monospace; }
+      input[type=text]:focus { border-color:#ff5757; }
+      .spacer { height:17px; }
+      footer { display:flex; align-items:center; justify-content:space-between; margin-top:18px; }
+      button { border:0; border-radius:8px; padding:10px 13px; font-weight:700; cursor:pointer; }
+      .secondary { padding-inline:0; color:#f18b8b; background:transparent; font-size:12px; }
+      .danger { color:#ffd8d8; background:#3a2020; }
+      .primary { color:#260808; background:#ff4f4f; }
+      #status { color:#aaa; font-size:12px; }
+      .hidden { display:none; }
+    </style>
+  </head>
+  <body>
+    <main id="general" class="hidden">
+      <h1>App settings</h1>
+      <p class="intro">Control how YouTube Music behaves on your computer.</p>
+      <section>
+        <div class="row"><div><strong>Start with Windows</strong><span class="hint">Open YouTube Music when you sign in to Windows.</span></div><input id="startup" type="checkbox" aria-label="Start with Windows" /></div>
+        <div class="row"><div><strong>Minimize to tray</strong><span class="hint">Keep music playing without a taskbar window.</span></div><input id="minimize-to-tray" type="checkbox" aria-label="Minimize to tray" /></div>
+        <div class="row"><div><strong>Close to tray</strong><span class="hint">Closing the player keeps it running in the notification area.</span></div><input id="close-to-tray" type="checkbox" aria-label="Close to tray" /></div>
+      </section>
+      <footer><button id="quit" class="danger">Quit YouTube Music</button><span id="general-status"></span><button id="save-general" class="primary">Save</button></footer>
+    </main>
+    <main id="discord" class="hidden">
+      <h1>Discord Rich Presence</h1>
+      <p class="intro">Shows a status only while a song is actively playing.</p>
+      <section>
+        <div class="row"><div><strong>Enable Rich Presence</strong><span class="hint">Displays song, artist, album, artwork, and elapsed time.</span></div><input id="discord-enabled" type="checkbox" aria-label="Enable Discord Rich Presence" /></div>
+        <label for="app-id">DISCORD APPLICATION ID</label>
+        <input id="app-id" type="text" placeholder="123456789012345678" autocomplete="off" />
+        <div class="spacer"></div>
+      </section>
+      <footer><button id="portal" class="secondary">Discord Developer Portal</button><span id="discord-status"></span><button id="save-discord" class="primary">Save</button></footer>
+    </main>
+    <script>
+      const api = window.youtubeMusicSettings;
+      const section = new URLSearchParams(location.search).get('section') === 'discord' ? 'discord' : 'general';
+      document.querySelector('#' + section).classList.remove('hidden');
+      const status = document.querySelector('#' + section + '-status');
+
+      api.get().then((settings) => {
+        document.querySelector('#startup').checked = Boolean(settings.startWithWindows);
+        document.querySelector('#minimize-to-tray').checked = Boolean(settings.minimizeToTray);
+        document.querySelector('#close-to-tray').checked = Boolean(settings.closeToTray);
+        document.querySelector('#discord-enabled').checked = Boolean(settings.discordEnabled);
+        document.querySelector('#app-id').value = settings.discordAppId || '';
+      });
+
+      document.querySelector('#save-general').addEventListener('click', async () => {
+        await api.save({
+          startWithWindows: document.querySelector('#startup').checked,
+          minimizeToTray: document.querySelector('#minimize-to-tray').checked,
+          closeToTray: document.querySelector('#close-to-tray').checked,
+        });
+        status.textContent = 'Saved';
+      });
+      document.querySelector('#quit').addEventListener('click', api.quit);
+      document.querySelector('#portal').addEventListener('click', api.openDiscordPortal);
+      document.querySelector('#save-discord').addEventListener('click', async () => {
+        const enabled = document.querySelector('#discord-enabled').checked;
+        const appId = document.querySelector('#app-id').value.trim();
+        if (enabled && !appId) { status.textContent = 'Enter an Application ID first.'; return; }
+        try {
+          await api.save({ discordEnabled: enabled, discordAppId: appId });
+          status.textContent = enabled ? 'Enabled' : 'Disabled';
+        } catch { status.textContent = 'Discord is not available.'; }
+      });
+    </script>
+  </body>
+</html>
