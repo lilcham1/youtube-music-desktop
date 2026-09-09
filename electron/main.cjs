@@ -129,7 +129,12 @@ function closeSettings() {
 }
 
 function showMainWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  // A legacy tray-only process may have no window left. Recreate it instead
+  // of leaving the tray icon unable to bring the app back.
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow();
+    return;
+  }
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
@@ -184,6 +189,9 @@ function createTray() {
   ]));
   tray.on('click', showMainWindow);
   tray.on('double-click', showMainWindow);
+  tray.on('mouse-up', (event) => {
+    if (event.button === 0 || event.button === undefined) showMainWindow();
+  });
 }
 
 async function disconnectDiscord() {
@@ -507,5 +515,9 @@ app.on('second-instance', () => {
 });
 
 app.on('before-quit', () => { app.isQuitting = true; });
-app.on('window-all-closed', () => {});
+app.on('window-all-closed', () => {
+  // When Close to tray is disabled, closing the last window really exits the
+  // app and removes the notification-area icon.
+  if (!app.isQuitting) app.quit();
+});
 app.on('will-quit', () => { void disconnectDiscord(); });
