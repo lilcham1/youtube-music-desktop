@@ -18,7 +18,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run package:desktop
+      - run: npm run package:desktop -- --publish never
       - name: Attach Windows update files
         uses: softprops/action-gh-release@v2
         with:
@@ -26,4 +26,3 @@ jobs:
             dist/YouTube Music Setup *.exe
             dist/YouTube Music Setup *.exe.blockmap
             dist/latest.yml
-
