@@ -183,6 +183,7 @@ function createTray() {
     { label: 'Quit YouTube Music', click: () => app.quit() },
   ]));
   tray.on('click', showMainWindow);
+  tray.on('double-click', showMainWindow);
 }
 
 async function disconnectDiscord() {
