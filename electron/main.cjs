@@ -32,7 +32,7 @@ if (!hasSingleInstanceLock) {
 
 let mainWindow;
 let playerView;
-let settingsWindow;
+let settingsView;
 let tray;
 let rpc;
 let rpcClientId = '';
@@ -93,34 +93,29 @@ function settingsSnapshot() {
 }
 
 function showSettings(section = 'general') {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.setTitle(section === 'discord' ? 'Discord Rich Presence' : 'YouTube Music Settings');
-    settingsWindow.loadFile(path.join(__dirname, 'settings.html'), { query: { section } });
-    settingsWindow.show();
-    settingsWindow.focus();
-    return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  showMainWindow();
+  if (!settingsView) {
+    settingsView = new BrowserView({
+      webPreferences: {
+        preload: path.join(__dirname, 'settings-preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
   }
+  mainWindow.setBrowserView(settingsView);
+  sizeContentView();
+  settingsView.webContents.loadFile(path.join(__dirname, 'settings.html'), { query: { section } });
+}
 
-  settingsWindow = new BrowserWindow({
-    parent: mainWindow,
-    modal: true,
-    width: 440,
-    height: 470,
-    resizable: false,
-    maximizable: false,
-    title: section === 'discord' ? 'Discord Rich Presence' : 'YouTube Music Settings',
-    icon: iconPath,
-    backgroundColor: '#171717',
-    webPreferences: {
-      preload: path.join(__dirname, 'settings-preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-  settingsWindow.setMenuBarVisibility(false);
-  settingsWindow.loadFile(path.join(__dirname, 'settings.html'), { query: { section } });
-  settingsWindow.on('closed', () => { settingsWindow = undefined; });
+function closeSettings() {
+  if (!mainWindow || mainWindow.isDestroyed() || !settingsView) return;
+  mainWindow.setBrowserView(playerView);
+  settingsView.webContents.close();
+  settingsView = undefined;
+  sizeContentView();
 }
 
 function showMainWindow() {
@@ -130,10 +125,11 @@ function showMainWindow() {
   mainWindow.focus();
 }
 
-function sizePlayerView() {
-  if (!mainWindow || !playerView) return;
+function sizeContentView() {
+  if (!mainWindow) return;
   const [width, height] = mainWindow.getContentSize();
-  playerView.setBounds({ x: 0, y: 40, width, height: Math.max(0, height - 40) });
+  const activeView = settingsView || playerView;
+  activeView?.setBounds({ x: 0, y: 40, width, height: Math.max(0, height - 40) });
 }
 
 function createTray() {
@@ -254,7 +250,7 @@ function createMainWindow() {
     },
   });
   mainWindow.setBrowserView(playerView);
-  sizePlayerView();
+  sizeContentView();
   playerView.webContents.loadURL(MUSIC_URL);
   playerView.webContents.on('did-finish-load', () => {
     setTimeout(() => { void setPlayerVolume(settings.volume); }, 600);
@@ -263,7 +259,7 @@ function createMainWindow() {
   playerView.webContents.on('media-paused', () => {
     updatePlayback({ ...playback, playing: false });
   });
-  mainWindow.on('resize', sizePlayerView);
+  mainWindow.on('resize', sizeContentView);
   mainWindow.on('minimize', (event) => {
     if (settings.minimizeToTray) {
       event.preventDefault();
@@ -276,11 +272,12 @@ function createMainWindow() {
       mainWindow.hide();
     }
   });
-  mainWindow.on('closed', () => { mainWindow = undefined; playerView = undefined; });
+  mainWindow.on('closed', () => { mainWindow = undefined; playerView = undefined; settingsView = undefined; });
 }
 
 ipcMain.on('open-settings', () => showSettings('general'));
 ipcMain.on('open-discord-settings', () => showSettings('discord'));
+ipcMain.on('settings:close', closeSettings);
 ipcMain.on('window:minimize', () => mainWindow?.minimize());
 ipcMain.on('window:maximize', () => {
   if (!mainWindow) return;
