@@ -271,6 +271,9 @@ function createMainWindow() {
     icon: iconPath,
     backgroundColor: '#030303',
     frame: false,
+    // Windows otherwise adds an accent-coloured resize frame around frameless
+    // windows. The custom title bar already provides the window controls.
+    thickFrame: false,
     webPreferences: {
       preload: path.join(__dirname, 'shell-preload.cjs'),
       contextIsolation: true,
