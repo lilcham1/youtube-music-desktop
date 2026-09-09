@@ -103,7 +103,6 @@ function addNumericVolume() {
 }
 
 function install() {
-  addNumericVolume();
   attachVideoEvents();
   schedulePlaybackReport();
 }
