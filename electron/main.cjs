@@ -5,9 +5,12 @@ const path = require('node:path');
 
 const MUSIC_URL = 'https://music.youtube.com/';
 const RELEASES_URL = 'https://github.com/lilcham1/youtube-music-desktop/releases/latest';
+// Public Discord Application ID used by every installation. It is an
+// identifier, not a secret: end users only choose whether to enable it.
+const DISCORD_APPLICATION_ID = '1547064138604347462';
 const DEFAULT_SETTINGS = {
   discordEnabled: false,
-  discordAppId: '',
+  discordAppId: DISCORD_APPLICATION_ID,
   minimizeToTray: true,
   closeToTray: true,
   startWithWindows: false,
@@ -54,6 +57,8 @@ function loadSettings() {
   try {
     const saved = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
     settings = { ...DEFAULT_SETTINGS, ...saved };
+    // Migrate installs made before Rich Presence was bundled.
+    if (!settings.discordAppId) settings.discordAppId = DISCORD_APPLICATION_ID;
   } catch {
     settings = { ...DEFAULT_SETTINGS };
   }
@@ -62,7 +67,10 @@ function loadSettings() {
 function saveSettings(next) {
   settings = { ...settings };
   if (typeof next.discordEnabled === 'boolean') settings.discordEnabled = next.discordEnabled;
-  if (typeof next.discordAppId === 'string') settings.discordAppId = next.discordAppId.trim();
+  // Keep the bundled application identity stable for every user. This is not
+  // configurable in the UI, but accepting a non-empty legacy value preserves
+  // settings written by earlier releases.
+  if (typeof next.discordAppId === 'string' && next.discordAppId.trim()) settings.discordAppId = next.discordAppId.trim();
   if (typeof next.minimizeToTray === 'boolean') settings.minimizeToTray = next.minimizeToTray;
   if (typeof next.closeToTray === 'boolean') settings.closeToTray = next.closeToTray;
   if (typeof next.startWithWindows === 'boolean') {
