@@ -38,6 +38,9 @@
         <div class="row"><div><strong>Minimize to tray</strong><span class="hint">Keep music playing without a taskbar window.</span></div><input id="minimize-to-tray" type="checkbox" aria-label="Minimize to tray" /></div>
         <div class="row"><div><strong>Close to tray</strong><span class="hint">Closing the player keeps it running in the notification area.</span></div><input id="close-to-tray" type="checkbox" aria-label="Close to tray" /></div>
       </section>
+      <section>
+        <div class="row"><div><strong>Updates</strong><span id="version" class="hint">Installed version</span></div><button id="check-updates" class="secondary">Open latest release</button></div>
+      </section>
       <footer><button id="quit" class="danger">Quit YouTube Music</button><span id="general-status"></span><button id="save-general" class="primary">Save</button></footer>
     </main>
     <main id="discord" class="hidden">
@@ -63,6 +66,7 @@
         document.querySelector('#close-to-tray').checked = Boolean(settings.closeToTray);
         document.querySelector('#discord-enabled').checked = Boolean(settings.discordEnabled);
         document.querySelector('#app-id').value = settings.discordAppId || '';
+        document.querySelector('#version').textContent = 'Installed version ' + (settings.version || 'unknown') + '. Opens GitHub to download the newest installer.';
       });
 
       document.querySelector('#save-general').addEventListener('click', async () => {
@@ -74,6 +78,7 @@
         status.textContent = 'Saved';
       });
       document.querySelector('#quit').addEventListener('click', api.quit);
+      document.querySelector('#check-updates').addEventListener('click', api.openLatestRelease);
       document.querySelector('#portal').addEventListener('click', api.openDiscordPortal);
       document.querySelector('#save-discord').addEventListener('click', async () => {
         const enabled = document.querySelector('#discord-enabled').checked;
