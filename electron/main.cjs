@@ -1,5 +1,6 @@
 const { app, BrowserWindow, BrowserView, Tray, Menu, ipcMain, nativeImage, shell } = require('electron');
 const RPC = require('discord-rpc');
+const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -11,8 +12,8 @@ const DISCORD_APPLICATION_ID = '1547064138604347462';
 const DEFAULT_SETTINGS = {
   discordEnabled: false,
   discordAppId: DISCORD_APPLICATION_ID,
-  minimizeToTray: true,
-  closeToTray: true,
+  minimizeToTray: false,
+  closeToTray: false,
   startWithWindows: false,
   volume: 50,
 };
@@ -48,6 +49,7 @@ let playback = {
   startedAt: 0,
 };
 let lastActivityKey = '';
+let updateStatus = { state: 'idle', message: 'Ready to check for updates.' };
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -59,6 +61,14 @@ function loadSettings() {
     settings = { ...DEFAULT_SETTINGS, ...saved };
     // Migrate installs made before Rich Presence was bundled.
     if (!settings.discordAppId) settings.discordAppId = DISCORD_APPLICATION_ID;
+    // v0.1.16 changed the standard window behavior: minimize keeps the app on
+    // the taskbar and close exits it. Preserve any choices made afterwards.
+    if (saved.windowBehaviorVersion !== 1) {
+      settings.minimizeToTray = false;
+      settings.closeToTray = false;
+      settings.windowBehaviorVersion = 1;
+      fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
+    }
   } catch {
     settings = { ...DEFAULT_SETTINGS };
   }
@@ -130,6 +140,35 @@ function sizeContentView() {
   const [width, height] = mainWindow.getContentSize();
   const activeView = settingsView || playerView;
   activeView?.setBounds({ x: 0, y: 40, width, height: Math.max(0, height - 40) });
+}
+
+function setUpdateStatus(state, message) {
+  updateStatus = { state, message };
+  settingsView?.webContents.send('updates:status', updateStatus);
+}
+
+function configureUpdater() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.on('checking-for-update', () => setUpdateStatus('checking', 'Checking for updates…'));
+  autoUpdater.on('update-available', (info) => setUpdateStatus('downloading', `Downloading YouTube Music ${info.version}…`));
+  autoUpdater.on('download-progress', (progress) => setUpdateStatus('downloading', `Downloading update: ${Math.round(progress.percent)}%`));
+  autoUpdater.on('update-not-available', () => setUpdateStatus('current', `You’re up to date (v${app.getVersion()}).`));
+  autoUpdater.on('update-downloaded', (info) => setUpdateStatus('downloaded', `YouTube Music ${info.version} is ready to install.`));
+  autoUpdater.on('error', () => setUpdateStatus('error', 'Updates are unavailable right now.'));
+}
+
+async function checkForUpdates() {
+  if (!app.isPackaged) {
+    setUpdateStatus('unavailable', 'Updates are available from the installed app.');
+    return updateStatus;
+  }
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch {
+    setUpdateStatus('error', 'Updates are unavailable right now.');
+  }
+  return updateStatus;
 }
 
 function createTray() {
@@ -438,7 +477,11 @@ ipcMain.handle('settings:save', async (_event, next) => {
   return snapshot;
 });
 ipcMain.handle('settings:open-discord-portal', () => shell.openExternal('https://discord.com/developers/applications'));
-ipcMain.handle('updates:open-release', () => shell.openExternal(RELEASES_URL));
+ipcMain.handle('updates:get-status', () => updateStatus);
+ipcMain.handle('updates:check', checkForUpdates);
+ipcMain.handle('updates:install', () => {
+  if (updateStatus.state === 'downloaded') autoUpdater.quitAndInstall();
+});
 ipcMain.on('settings:quit', () => app.quit());
 
 app.whenReady().then(() => {
@@ -446,6 +489,9 @@ app.whenReady().then(() => {
   loadSettings();
   createMainWindow();
   createTray();
+  configureUpdater();
+  setTimeout(() => { void checkForUpdates(); }, 12000);
+  setInterval(() => { void checkForUpdates(); }, 4 * 60 * 60 * 1000).unref();
   app.on('activate', () => {
     if (!mainWindow) createMainWindow();
     else showMainWindow();
