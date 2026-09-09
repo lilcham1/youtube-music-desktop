@@ -17,6 +17,14 @@ const iconPath = path.join(__dirname, 'icon.ico');
 // does not reuse that helper's old taskbar-icon cache.
 app.setAppUserModelId('com.youtube.music.personal.desktop');
 
+// A desktop player must have one visible application instance. Launching the
+// shortcut again brings the existing window forward instead of opening another
+// player (and another Discord RPC connection) in the background.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+
 let mainWindow;
 let playerView;
 let settingsWindow;
@@ -99,6 +107,8 @@ function showSettings(section = 'general') {
 }
 
 function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
 }
@@ -406,6 +416,7 @@ ipcMain.handle('settings:open-discord-portal', () => shell.openExternal('https:/
 ipcMain.on('settings:quit', () => app.quit());
 
 app.whenReady().then(() => {
+  if (!hasSingleInstanceLock) return;
   loadSettings();
   createMainWindow();
   createTray();
@@ -413,6 +424,10 @@ app.whenReady().then(() => {
     if (!mainWindow) createMainWindow();
     else showMainWindow();
   });
+});
+
+app.on('second-instance', () => {
+  if (app.isReady()) showMainWindow();
 });
 
 app.on('before-quit', () => { app.isQuitting = true; });
