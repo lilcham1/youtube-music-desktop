@@ -1,25 +1,52 @@
-const { app, BrowserWindow, BrowserView, Tray, Menu, ipcMain, nativeImage, shell } = require('electron');
+const { app, BrowserWindow, BrowserView, Tray, Menu, ipcMain, nativeImage, shell, dialog } = require('electron');
 const RPC = require('discord-rpc');
+const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const path = require('node:path');
+const { profileDirectory, migrateLegacyProfile, writeSettings } = require('./profile.cjs');
 
 const MUSIC_URL = 'https://music.youtube.com/';
+// Public Discord Application ID used by every installation. It is an
+// identifier, not a secret: end users only choose whether to enable it.
+const DISCORD_APPLICATION_ID = '1547064138604347462';
 const DEFAULT_SETTINGS = {
   discordEnabled: false,
-  discordAppId: '',
-  minimizeToTray: true,
-  closeToTray: true,
+  discordAppId: DISCORD_APPLICATION_ID,
+  minimizeToTray: false,
+  closeToTray: false,
   startWithWindows: false,
+  volume: 50,
 };
 const iconPath = path.join(__dirname, 'icon.ico');
+
+// Keep YouTube's media pipeline alive when the player is minimized, covered by
+// another window, or restored from the tray. Chromium's background timer
+// throttling can otherwise interrupt long-running playback.
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
 // Keep this desktop window separate from the retired Tauri helper so Windows
 // does not reuse that helper's old taskbar-icon cache.
 app.setAppUserModelId('com.youtube.music.personal.desktop');
 
+const legacyProfile = path.join(app.getPath('appData'), 'youtube-music-personal');
+const sharedProfile = profileDirectory(app.getPath('home'));
+fs.mkdirSync(sharedProfile, { recursive: true });
+app.setPath('userData', sharedProfile);
+app.setPath('sessionData', sharedProfile);
+
+// A desktop player must have one visible application instance. Launching the
+// shortcut again brings the existing window forward instead of opening another
+// player (and another Discord RPC connection) in the background.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+
 let mainWindow;
 let playerView;
-let settingsWindow;
+let settingsView;
 let tray;
 let rpc;
 let rpcClientId = '';
@@ -35,6 +62,7 @@ let playback = {
   startedAt: 0,
 };
 let lastActivityKey = '';
+let updateStatus = { state: 'idle', message: 'Ready to check for updates.' };
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -44,69 +72,142 @@ function loadSettings() {
   try {
     const saved = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
     settings = { ...DEFAULT_SETTINGS, ...saved };
-  } catch {
-    settings = { ...DEFAULT_SETTINGS };
+    // Migrate installs made before Rich Presence was bundled.
+    if (!settings.discordAppId) settings.discordAppId = DISCORD_APPLICATION_ID;
+    // v0.1.16 changed the standard window behavior: minimize keeps the app on
+    // the taskbar and close exits it. Preserve any choices made afterwards.
+    if (saved.windowBehaviorVersion !== 1) {
+      settings.minimizeToTray = false;
+      settings.closeToTray = false;
+      settings.windowBehaviorVersion = 1;
+      writeSettings(settingsPath(), settings);
+    }
+  } catch (error) {
+    // A missing or unreadable settings file (first run, or a corrupt/truncated
+    // JSON left by an OS crash) must not stop the app from starting: fall back
+    // to defaults and rewrite a valid file. Only genuine access failures
+    // (EACCES/EPERM/EISDIR) are surfaced to the user as a profile problem.
+    if (error.code && error.code !== 'ENOENT') throw error;
+    settings = { ...DEFAULT_SETTINGS, windowBehaviorVersion: 1 };
+    try {
+      writeSettings(settingsPath(), settings);
+    } catch (writeError) {
+      if (writeError.code === 'EACCES' || writeError.code === 'EPERM') throw writeError;
+    }
   }
 }
 
 function saveSettings(next) {
   settings = { ...settings };
   if (typeof next.discordEnabled === 'boolean') settings.discordEnabled = next.discordEnabled;
-  if (typeof next.discordAppId === 'string') settings.discordAppId = next.discordAppId.trim();
+  // Keep the bundled application identity stable for every user. This is not
+  // configurable in the UI, but accepting a non-empty legacy value preserves
+  // settings written by earlier releases.
+  if (typeof next.discordAppId === 'string' && next.discordAppId.trim()) settings.discordAppId = next.discordAppId.trim();
   if (typeof next.minimizeToTray === 'boolean') settings.minimizeToTray = next.minimizeToTray;
   if (typeof next.closeToTray === 'boolean') settings.closeToTray = next.closeToTray;
   if (typeof next.startWithWindows === 'boolean') {
     settings.startWithWindows = next.startWithWindows;
     app.setLoginItemSettings({ openAtLogin: settings.startWithWindows, openAsHidden: true });
   }
-  fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
+  if (next.volume !== undefined && Number.isFinite(Number(next.volume))) {
+    settings.volume = Math.max(0, Math.min(100, Math.round(Number(next.volume))));
+  }
+  writeSettings(settingsPath(), settings);
   return settings;
 }
 
 function settingsSnapshot() {
-  return { ...settings, startWithWindows: app.getLoginItemSettings().openAtLogin };
+  return {
+    ...settings,
+    version: app.getVersion(),
+    startWithWindows: app.getLoginItemSettings().openAtLogin,
+  };
+}
+
+function syncShellSettings() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const volume = JSON.stringify(String(settings.volume));
+  const discordEnabled = settings.discordEnabled ? 'true' : 'false';
+  void mainWindow.webContents.executeJavaScript(`(() => {
+    const volumeInput = document.getElementById('volume');
+    if (volumeInput) volumeInput.value = ${volume};
+    document.getElementById('discord')?.classList.toggle('enabled', ${discordEnabled});
+  })()`, true).catch(() => {});
 }
 
 function showSettings(section = 'general') {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.setTitle(section === 'discord' ? 'Discord Rich Presence' : 'YouTube Music Settings');
-    settingsWindow.loadFile(path.join(__dirname, 'settings.html'), { query: { section } });
-    settingsWindow.show();
-    settingsWindow.focus();
-    return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  showMainWindow();
+  if (!settingsView) {
+    settingsView = new BrowserView({
+      webPreferences: {
+        preload: path.join(__dirname, 'settings-preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
   }
+  mainWindow.setBrowserView(settingsView);
+  sizeContentView();
+  settingsView.webContents.loadFile(path.join(__dirname, 'settings.html'), { query: { section } });
+}
 
-  settingsWindow = new BrowserWindow({
-    parent: mainWindow,
-    modal: true,
-    width: 440,
-    height: 410,
-    resizable: false,
-    maximizable: false,
-    title: section === 'discord' ? 'Discord Rich Presence' : 'YouTube Music Settings',
-    icon: iconPath,
-    backgroundColor: '#171717',
-    webPreferences: {
-      preload: path.join(__dirname, 'settings-preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-  settingsWindow.setMenuBarVisibility(false);
-  settingsWindow.loadFile(path.join(__dirname, 'settings.html'), { query: { section } });
-  settingsWindow.on('closed', () => { settingsWindow = undefined; });
+function closeSettings() {
+  if (!mainWindow || mainWindow.isDestroyed() || !settingsView) return;
+  mainWindow.setBrowserView(playerView);
+  settingsView.webContents.close();
+  settingsView = undefined;
+  sizeContentView();
 }
 
 function showMainWindow() {
+  // A legacy tray-only process may have no window left. Recreate it instead
+  // of leaving the tray icon unable to bring the app back.
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
 }
 
-function sizePlayerView() {
-  if (!mainWindow || !playerView) return;
+function sizeContentView() {
+  if (!mainWindow) return;
   const [width, height] = mainWindow.getContentSize();
-  playerView.setBounds({ x: 0, y: 40, width, height: Math.max(0, height - 40) });
+  const activeView = settingsView || playerView;
+  activeView?.setBounds({ x: 0, y: 40, width, height: Math.max(0, height - 40) });
+}
+
+function setUpdateStatus(state, message) {
+  updateStatus = { state, message };
+  settingsView?.webContents.send('updates:status', updateStatus);
+}
+
+function configureUpdater() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.on('checking-for-update', () => setUpdateStatus('checking', 'Checking for updates…'));
+  autoUpdater.on('update-available', (info) => setUpdateStatus('downloading', `Downloading YouTube Music ${info.version}…`));
+  autoUpdater.on('download-progress', (progress) => setUpdateStatus('downloading', `Downloading update: ${Math.round(progress.percent)}%`));
+  autoUpdater.on('update-not-available', () => setUpdateStatus('current', `You’re up to date (v${app.getVersion()}).`));
+  autoUpdater.on('update-downloaded', (info) => setUpdateStatus('downloaded', `YouTube Music ${info.version} is ready to install.`));
+  autoUpdater.on('error', () => setUpdateStatus('error', 'Updates are unavailable right now.'));
+}
+
+async function checkForUpdates() {
+  if (!app.isPackaged) {
+    setUpdateStatus('unavailable', 'Updates are available from the installed app.');
+    return updateStatus;
+  }
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch {
+    setUpdateStatus('error', 'Updates are unavailable right now.');
+  }
+  return updateStatus;
 }
 
 function createTray() {
@@ -121,6 +222,10 @@ function createTray() {
     { label: 'Quit YouTube Music', click: () => app.quit() },
   ]));
   tray.on('click', showMainWindow);
+  tray.on('double-click', showMainWindow);
+  tray.on('mouse-up', (event) => {
+    if (event.button === 0 || event.button === undefined) showMainWindow();
+  });
 }
 
 async function disconnectDiscord() {
@@ -209,6 +314,9 @@ function createMainWindow() {
     icon: iconPath,
     backgroundColor: '#030303',
     frame: false,
+    // Windows otherwise adds an accent-coloured resize frame around frameless
+    // windows. The custom title bar already provides the window controls.
+    thickFrame: false,
     webPreferences: {
       preload: path.join(__dirname, 'shell-preload.cjs'),
       contextIsolation: true,
@@ -217,24 +325,39 @@ function createMainWindow() {
     },
   });
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.loadFile(path.join(__dirname, 'shell.html'));
-  playerView = new BrowserView({
-    webPreferences: {
-      preload: path.join(__dirname, 'player-preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
+  // Pass the current values with the first title-bar load as well as through
+  // IPC below. This avoids a race where a freshly created shell renders its
+  // hard-coded placeholders before the asynchronous settings request returns.
+  mainWindow.loadFile(path.join(__dirname, 'shell.html'), {
+    query: {
+      volume: String(settings.volume),
+      discordEnabled: settings.discordEnabled ? '1' : '0',
     },
   });
+  // A direct post-load sync is intentionally kept alongside the initial URL
+  // values and IPC bridge. It covers renderer restarts that can otherwise
+  // leave title-bar controls at their HTML fallback values.
+  mainWindow.webContents.on('did-finish-load', syncShellSettings);
+  playerView = new BrowserView({
+      webPreferences: {
+        preload: path.join(__dirname, 'player-preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        backgroundThrottling: false,
+      },
+  });
   mainWindow.setBrowserView(playerView);
-  sizePlayerView();
+  sizeContentView();
   playerView.webContents.loadURL(MUSIC_URL);
-  playerView.webContents.on('did-finish-load', () => { setTimeout(injectVolumeControl, 600); });
+  playerView.webContents.on('did-finish-load', () => {
+    setTimeout(() => { void setPlayerVolume(settings.volume); }, 600);
+  });
   playerView.webContents.on('media-started-playing', () => { void readActiveTrack(); });
   playerView.webContents.on('media-paused', () => {
     updatePlayback({ ...playback, playing: false });
   });
-  mainWindow.on('resize', sizePlayerView);
+  mainWindow.on('resize', sizeContentView);
   mainWindow.on('minimize', (event) => {
     if (settings.minimizeToTray) {
       event.preventDefault();
@@ -247,11 +370,12 @@ function createMainWindow() {
       mainWindow.hide();
     }
   });
-  mainWindow.on('closed', () => { mainWindow = undefined; playerView = undefined; });
+  mainWindow.on('closed', () => { mainWindow = undefined; playerView = undefined; settingsView = undefined; });
 }
 
 ipcMain.on('open-settings', () => showSettings('general'));
 ipcMain.on('open-discord-settings', () => showSettings('discord'));
+ipcMain.on('settings:close', closeSettings);
 ipcMain.on('window:minimize', () => mainWindow?.minimize());
 ipcMain.on('window:maximize', () => {
   if (!mainWindow) return;
@@ -259,7 +383,12 @@ ipcMain.on('window:maximize', () => {
   else mainWindow.maximize();
 });
 ipcMain.on('window:close', () => mainWindow?.close());
-ipcMain.on('volume:set', (_event, value) => { void setPlayerVolume(value); });
+ipcMain.on('volume:set', (_event, value) => {
+  const saved = saveSettings({ volume: value });
+  void setPlayerVolume(saved.volume);
+  syncShellSettings();
+  mainWindow?.webContents.send('settings:changed', settingsSnapshot());
+});
 function updatePlayback(next) {
   const wasPlaying = playback.playing;
   const changedTrack = playback.title !== next.title || playback.artist !== next.artist;
@@ -322,55 +451,12 @@ async function readActiveTrack() {
   }
 }
 
-async function injectVolumeControl() {
-  if (!playerView || playerView.webContents.isDestroyed()) return;
-  try {
-    await playerView.webContents.executeJavaScript(`(() => {
-      if (window.__ytmNumericVolumeInstalled || document.getElementById('ytm-desktop-volume')) return;
-      window.__ytmNumericVolumeInstalled = true;
-      const find = (selector, root = document) => {
-        const direct = root.querySelector?.(selector);
-        if (direct) return direct;
-        for (const element of root.querySelectorAll?.('*') || []) {
-          if (element.shadowRoot) { const nested = find(selector, element.shadowRoot); if (nested) return nested; }
-        }
-        return null;
-      };
-      const clamp = (value) => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
-      const widget = document.createElement('label');
-      widget.id = 'ytm-desktop-volume';
-      widget.title = 'Volume (0 to 100)';
-      widget.innerHTML = '<span>VOL</span><input aria-label="Volume, 0 to 100" type="number" min="0" max="100" step="1">';
-      const input = widget.querySelector('input');
-      document.documentElement.append(widget);
-      let slider;
-      const bind = () => {
-        slider = find('#volume-slider') || find('paper-slider#volume-slider') || slider;
-        if (!slider) { input.disabled = true; input.value = '0'; return; }
-        input.disabled = false;
-        input.value = String(clamp(slider.value ?? slider.getAttribute('value')));
-        slider.style.display = 'none';
-      };
-      input.addEventListener('change', () => {
-        const value = clamp(input.value);
-        input.value = String(value);
-        const player = find('ytmusic-player-bar');
-        if (typeof player?.updateVolume === 'function') player.updateVolume(value);
-        else if (slider) {
-          slider.value = value;
-          slider.dispatchEvent(new Event('input', { bubbles: true }));
-          slider.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      });
-      new MutationObserver(bind).observe(document.documentElement, { childList: true, subtree: true });
-      bind();
-    })()`, true);
-  } catch {}
-}
-
 async function setPlayerVolume(value) {
   if (!playerView || playerView.webContents.isDestroyed()) return;
   const volume = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  // A linear 1–4% gain is effectively silent on many speakers. Keep the
+  // numeric control intuitive while applying a gentle perceptual curve.
+  const playerVolume = volume === 0 ? 0 : Math.round(Math.pow(volume / 100, 0.7) * 100);
   try {
     await playerView.webContents.executeJavaScript(`(() => {
       const find = (selector, root = document) => {
@@ -383,8 +469,11 @@ async function setPlayerVolume(value) {
       };
       const slider = find('#volume-slider') || find('paper-slider#volume-slider') || find('input[type="range"]');
       const player = find('ytmusic-player-bar');
-      if (typeof player?.updateVolume === 'function') player.updateVolume(${volume});
-      else if (slider) { slider.value = ${volume}; slider.dispatchEvent(new Event('input', { bubbles: true })); slider.dispatchEvent(new Event('change', { bubbles: true })); }
+      const playerVolume = ${playerVolume};
+      if (typeof player?.updateVolume === 'function') player.updateVolume(playerVolume);
+      if (slider) { slider.value = playerVolume; slider.dispatchEvent(new Event('input', { bubbles: true })); slider.dispatchEvent(new Event('change', { bubbles: true })); }
+      const video = find('video');
+      if (video) video.volume = playerVolume / 100;
     })()`, true);
   } catch {}
 }
@@ -403,18 +492,43 @@ ipcMain.handle('settings:save', async (_event, next) => {
   return snapshot;
 });
 ipcMain.handle('settings:open-discord-portal', () => shell.openExternal('https://discord.com/developers/applications'));
+ipcMain.handle('updates:get-status', () => updateStatus);
+ipcMain.handle('updates:check', checkForUpdates);
+ipcMain.handle('updates:install', () => {
+  if (updateStatus.state === 'downloaded') autoUpdater.quitAndInstall();
+});
 ipcMain.on('settings:quit', () => app.quit());
 
 app.whenReady().then(() => {
-  loadSettings();
+  if (!hasSingleInstanceLock) return;
+  try {
+    migrateLegacyProfile(sharedProfile, legacyProfile);
+    loadSettings();
+  } catch (error) {
+    dialog.showErrorBox('YouTube Music could not load your profile',
+      `Your saved profile could not be opened. Please check access to ${sharedProfile}.\n\n${error.message}`);
+    app.quit();
+    return;
+  }
   createMainWindow();
   createTray();
+  configureUpdater();
+  setTimeout(() => { void checkForUpdates(); }, 12000);
+  setInterval(() => { void checkForUpdates(); }, 4 * 60 * 60 * 1000).unref();
   app.on('activate', () => {
     if (!mainWindow) createMainWindow();
     else showMainWindow();
   });
 });
 
+app.on('second-instance', () => {
+  if (app.isReady()) showMainWindow();
+});
+
 app.on('before-quit', () => { app.isQuitting = true; });
-app.on('window-all-closed', () => {});
+app.on('window-all-closed', () => {
+  // When Close to tray is disabled, closing the last window really exits the
+  // app and removes the notification-area icon.
+  if (!app.isQuitting) app.quit();
+});
 app.on('will-quit', () => { void disconnectDiscord(); });

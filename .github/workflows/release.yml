@@ -1,0 +1,28 @@
+name: Publish Windows release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run package:desktop -- --publish never
+      - name: Attach Windows update files
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/YouTube Music Setup *.exe
+            dist/YouTube Music Setup *.exe.blockmap
+            dist/latest.yml

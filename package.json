@@ -1,11 +1,12 @@
 {
   "name": "youtube-music-personal",
   "private": true,
-  "version": "0.1.10",
+  "version": "0.1.25",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
     "desktop": "electron .",
+    "test": "node --test \"test/**/*.test.cjs\"",
     "package:desktop": "electron-builder --win nsis"
   },
   "build": {
@@ -20,6 +21,12 @@
       "target": "nsis",
       "icon": "electron/icon.ico"
     },
+    "publish": [{
+      "provider": "github",
+      "owner": "lilcham1",
+      "repo": "youtube-music-desktop",
+      "releaseType": "release"
+    }],
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": false,
@@ -28,7 +35,8 @@
     }
   },
   "dependencies": {
-    "discord-rpc": "^4.0.1"
+    "discord-rpc": "^4.0.1",
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "electron": "^44.3.0",

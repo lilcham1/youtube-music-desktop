@@ -41,9 +41,23 @@
     <script>
       const api = window.youtubeMusicShell;
       const discord = document.querySelector('#discord');
-      const markDiscord = (settings) => discord.classList.toggle('enabled', Boolean(settings.discordEnabled));
-      api.getSettings().then(markDiscord);
-      api.onSettingsChanged(markDiscord);
+      const volume = document.querySelector('#volume');
+      const syncSettings = (settings) => {
+        discord.classList.toggle('enabled', Boolean(settings.discordEnabled));
+        if (settings.volume != null && settings.volume !== '' && Number.isFinite(Number(settings.volume))) {
+          volume.value = String(Number(settings.volume));
+        }
+      };
+      // The main process embeds the persisted values in the initial local
+      // document URL. It makes the title bar deterministic even if IPC is
+      // temporarily unavailable during a renderer restart.
+      const initial = new URLSearchParams(window.location.search);
+      syncSettings({
+        discordEnabled: initial.get('discordEnabled') === '1',
+        volume: initial.get('volume'),
+      });
+      api.getSettings().then(syncSettings);
+      api.onSettingsChanged(syncSettings);
       document.querySelector('#discord').addEventListener('click', api.openDiscordSettings);
       document.querySelector('#volume').addEventListener('change', (event) => api.setVolume(event.target.value));
       document.querySelector('#settings').addEventListener('click', api.openSettings);
