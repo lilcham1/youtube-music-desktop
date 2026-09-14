@@ -1,3 +1,66 @@
+# Audio verification — 0.1.32
+
+Investigated on 2026-09-14 against music.youtube.com in an Electron 44 view.
+
+## Reported
+
+- Audio disappeared mid-session while the track position kept advancing.
+- Each launch started loud and then dropped to the saved level, so the Windows
+  volume mixer had been lowered to compensate.
+
+## Root cause
+
+- 0.1.29–0.1.31 muted the whole webContents (`setAudioMuted(true)`) on load and
+  waited for the page to report a `volume-ready` event before un-muting. That
+  event depends on `<video>` lifecycle events that YouTube does not always fire
+  for a re-used media element, so the un-mute could be missed and the stream
+  stayed silent. A time-based fail-safe only papered over the ordering problem.
+- The loud start happened because the page's player initialised at YouTube's
+  own remembered level (often 100) and the app corrected it only after
+  `did-finish-load`, hundreds of milliseconds into playback.
+- Writing `#movie_player.setVolume` directly changes the engine but not the
+  player bar's state or its persisted value (`PREF` cookie), so the page could
+  later snap back to a different level. `ytmusic-player-bar.volume` is read-only
+  from outside; `updateVolume(n)` is the one call that updates bar, engine and
+  cookie together.
+
+## Measured behaviour (music.youtube.com, 2026-09-14)
+
+- Volume is persisted in the `PREF` cookie on `.youtube.com` as `volume=N`
+  (N = slider value), not in localStorage. Seeding `PREF=volume=77` and
+  reloading produced bar 77 / engine 50 on the first sample after load.
+- Slider→engine is nonlinear: 5→1, 10→2, 20→5, 30→8, 40→13, 50→20, 60→29,
+  70→40, 80→55, 90→74, 100→100; 1–4 map to engine 0.
+- `paper-slider` dispatches a composed `value-change` event and reflects
+  `value` / `aria-valuenow` as attributes, so an isolated-world preload can
+  observe in-page volume changes without touching page-defined properties.
+
+## Changes
+
+- Volume is stored on the slider scale. Existing engine-scale settings are
+  converted once at startup (`volumeScale: 'slider'`) using the measured
+  curve, so the upgrade keeps the same loudness.
+- The saved level is written into the `PREF` cookie before the player page is
+  loaded and again whenever it changes. Other PREF fields are preserved.
+- Live changes go through `ytmusic-player-bar.updateVolume`.
+- In-page slider changes are reported back and saved, so the title bar, the
+  page and the next launch agree.
+- All `setAudioMuted` calls, the navigation-triggered guard, the
+  `media-attached` / `volume-ready` signals and the fail-safe timer are gone.
+  Nothing in the app can silence the stream any more.
+
+## Verification
+
+- 9 automated tests pass (`npm test`): PREF merging, migration monotonicity,
+  bar-API routing, no watchdog/mute listeners in the preload, slider
+  round-trip reporting, DOM-readiness, profile persistence.
+- Live check in the packaged app: see `scripts/test-player-live.cjs`.
+
+After installing, reset the app's level in the Windows volume mixer to 100 %
+and use the title-bar VOL control; the mixer workaround is no longer needed.
+
+---
+
 # Audio dropout verification — 0.1.29
 
 Tested on Windows against the installed application on 2026-09-10.

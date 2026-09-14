@@ -38,15 +38,18 @@ The NSIS installer is created in `dist/`.
 
 ## Playback regression checks
 
-Run `npm test` for volume mapping, mute behavior, preload readiness, and profile
-persistence tests. Numeric volume is applied through the playback engine, not
-YouTube Music's nonlinear slider. Per-song loudness normalization remains intact.
+Run `npm test` for volume cookie handling, slider round-trips, preload readiness,
+and profile persistence tests. The title-bar volume is YouTube Music's own 0–100
+slider value: it is seeded into the `PREF` cookie before the page loads (so the
+player starts at that level from its first frame) and applied live through the
+player bar's `updateVolume`. The app never mutes or un-mutes the audio stream
+itself, and never writes the engine or media volume behind YouTube's back.
 
 For an opt-in live test, close the app, launch it with
 `--remote-debugging-address=127.0.0.1 --remote-debugging-port=9231`, load a song,
-then run `node scripts/test-player-live.cjs`. This starts playback, tests levels
-0–4, mute/pause, seeking, a track transition and two minutes of minimized
-playback. It leaves the saved volume at 1. Close and reopen normally afterward
+then run `node scripts/test-player-live.cjs`. This starts playback, tests several
+levels including 0, a slider round-trip, pause, seeking, a track transition and
+two minutes of minimized playback. It leaves the saved volume at 10. Close and reopen normally afterward
 to disable debugging. Debugging is never enabled by the app itself.
 
 ## Discord Rich Presence

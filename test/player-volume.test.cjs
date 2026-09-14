@@ -3,105 +3,135 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
-const { applyPlayerVolume } = require('../electron/player-volume.cjs');
+const {
+  withPrefVolume, prefVolume, engineToSliderVolume, applyPlayerVolume,
+} = require('../electron/player-volume.cjs');
 
-function fixture() {
-  const media = { volume: 0, muted: false };
-  let engineVolume = 0;
-  const engine = {
-    setVolume(value) { engineVolume = value; media.volume = value / 100; },
-    getVolume() { return engineVolume; },
-    isMuted() { return media.muted; },
-    unMute() { media.muted = false; this.setVolume(5); },
-  };
+test('PREF cookie: volume is added, replaced, and other fields are preserved', () => {
+  assert.equal(withPrefVolume(undefined, 42), 'volume=42');
+  assert.equal(withPrefVolume('', 42), 'volume=42');
+  assert.equal(withPrefVolume('volume=7', 42), 'volume=42');
+  assert.equal(withPrefVolume('f6=40000000&tz=Europe.Paris&volume=7&f7=100', 42),
+    'f6=40000000&tz=Europe.Paris&f7=100&volume=42');
+  assert.equal(withPrefVolume('tz=UTC', 250), 'tz=UTC&volume=100');
+  assert.equal(withPrefVolume('tz=UTC', -3), 'tz=UTC&volume=0');
+  assert.equal(withPrefVolume('tz=UTC&volume=9', 'nope'), 'tz=UTC', 'an invalid level drops the field');
+  assert.equal(prefVolume('f6=1&volume=42&f7=2'), 42);
+  assert.equal(prefVolume('volume=42'), 42);
+  assert.equal(prefVolume('f6=1'), undefined);
+});
+
+test('engine gain migrates to the slider scale monotonically and within bounds', () => {
+  assert.equal(engineToSliderVolume(0), 0);
+  assert.equal(engineToSliderVolume(20), 50);
+  assert.equal(engineToSliderVolume(100), 100);
+  assert.equal(engineToSliderVolume(-5), 0);
+  assert.equal(engineToSliderVolume(500), 100);
+  assert.equal(engineToSliderVolume('x'), undefined);
+  let previous = -1;
+  for (let engine = 0; engine <= 100; engine++) {
+    const slider = engineToSliderVolume(engine);
+    assert.ok(slider >= previous && slider >= 0 && slider <= 100, `engine ${engine} → ${slider}`);
+    previous = slider;
+  }
+});
+
+function pageFixture(hasBar = true) {
+  const calls = [];
+  const bar = { updateVolume(value) { calls.push(value); } };
   const document = { querySelector(selector) {
-    assert.equal(selector, '#movie_player', 'must not write the nonlinear Music slider');
-    return engine;
+    assert.equal(selector, 'ytmusic-player-bar', 'volume must go through the player bar, never the raw engine');
+    return hasBar ? bar : null;
   } };
-  const apply = (value, unmute = false) => vm.runInNewContext(
-    `(${applyPlayerVolume.toString()})(${JSON.stringify(value)}, ${unmute})`, { document },
+  const apply = (value) => vm.runInNewContext(
+    `(${applyPlayerVolume.toString()})(${JSON.stringify(value)})`, { document },
   );
-  return { media, engine, apply };
+  return { calls, apply };
 }
 
-test('all 101 numeric levels keep media and engine synchronized, including 1–4', () => {
-  const { media, engine, apply } = fixture();
-  for (let volume = 0; volume <= 100; volume++) {
-    assert.equal(apply(volume), true);
-    assert.equal(engine.getVolume(), volume);
-    assert.equal(media.volume, volume / 100);
-    // A subsequent engine reapplication must not restore a stale zero.
-    engine.setVolume(engine.getVolume());
-    assert.equal(media.volume, volume / 100);
-  }
-});
-
-test('lifecycle restore honors mute; only a positive user volume change unmutes', () => {
-  const { media, apply } = fixture();
-  media.muted = true;
-  apply(1);
-  assert.equal(media.muted, true);
-  apply(0, true);
-  assert.equal(media.muted, true);
-  apply(1, true);
-  assert.equal(media.muted, false);
-  assert.equal(media.volume, 0.01);
-});
-
-test('bounds and invalid volume are safe', () => {
-  const { engine, apply } = fixture();
-  apply(-10); assert.equal(engine.getVolume(), 0);
-  apply(120); assert.equal(engine.getVolume(), 100);
-  apply(2.6); assert.equal(engine.getVolume(), 3);
+test('applyPlayerVolume uses the player bar API with a clamped integer level', () => {
+  const { calls, apply } = pageFixture();
+  assert.equal(apply(42), true);
+  assert.equal(apply(2.6), true);
+  assert.equal(apply(-10), true);
+  assert.equal(apply(120), true);
+  assert.deepEqual(calls, [42, 3, 0, 100]);
   assert.equal(apply('invalid'), false);
-  assert.equal(engine.getVolume(), 3);
+  assert.equal(calls.length, 4);
 });
 
-test('an unavailable player does not fall back to an unsynchronized media write', () => {
-  assert.equal(vm.runInNewContext(`(${applyPlayerVolume.toString()})(1)`, {
-    document: { querySelector() { return null; } },
-  }), false);
+test('an unavailable player bar is reported, not worked around', () => {
+  const { calls, apply } = pageFixture(false);
+  assert.equal(apply(42), false);
+  assert.deepEqual(calls, []);
 });
 
-test('preload guards new media, then syncs its volume without forcing playback or unmuting', () => {
+function loadPreload({ readyState = 'complete', documentElement = {}, video } = {}) {
   const source = fs.readFileSync(path.join(__dirname, '../electron/player-preload.cjs'), 'utf8');
-  const sent = [], events = {};
-  const video = { dataset: {}, addEventListener(name, callback) {
-    (events[name] ||= []).push(callback);
-  } };
+  const sent = [];
+  const docListeners = {};
+  const videoEvents = {};
+  const slider = { attrs: {}, getAttribute(name) { return this.attrs[name] ?? null; } };
   const document = {
-    readyState: 'complete', documentElement: {},
-    querySelectorAll(selector) { return selector === 'video' ? [video] : []; },
+    readyState,
+    documentElement,
+    addEventListener(name, callback) { (docListeners[name] ||= []).push(callback); },
+    querySelector(selector) { return selector === '#volume-slider' ? slider : null; },
+    querySelectorAll(selector) { return selector === 'video' && video ? [video] : []; },
+    title: '',
   };
+  if (video) video.addEventListener = (name, callback) => { (videoEvents[name] ||= []).push(callback); };
+  let observations = 0;
   vm.runInNewContext(source, {
-    require() { return { ipcRenderer: { send(channel) { sent.push(channel); } } }; },
-    document, MutationObserver: class { observe() {} },
+    require() { return { ipcRenderer: { send(channel, value) { sent.push([channel, value]); } } }; },
+    document, navigator: {},
+    MutationObserver: class { observe(root) { assert.ok(root); observations++; } },
     setTimeout() { return 1; }, clearTimeout() {},
   });
-  assert.deepEqual(sent, ['player:media-attached']);
-  for (const event of ['loadedmetadata', 'playing']) events[event].forEach(callback => callback());
-  assert.equal(sent.filter(channel => channel === 'player:volume-ready').length, 2);
-  for (const event of ['pause', 'waiting', 'stalled', 'error', 'volumechange']) {
-    (events[event] || []).forEach(callback => callback());
+  return { sent, docListeners, videoEvents, slider, observations: () => observations };
+}
+
+test('preload never mutes, guards, or force-plays media; it only observes playback', () => {
+  const video = { dataset: {}, paused: true, ended: false, readyState: 0, currentTime: 0 };
+  const { sent, videoEvents } = loadPreload({ video });
+  assert.deepEqual(sent, [], 'attaching media must not signal the main process');
+  const bound = Object.keys(videoEvents).sort();
+  for (const forbidden of ['stalled', 'waiting', 'error', 'volumechange']) {
+    assert.ok(!bound.includes(forbidden), `${forbidden} must not drive a watchdog`);
   }
-  assert.equal(sent.length, 3, 'pause/mute/buffering must not trigger a volume/play watchdog');
+  assert.ok(bound.includes('play') && bound.includes('pause'));
+});
+
+test('preload reports the slider level once per change so the title bar follows the page', () => {
+  const { sent, docListeners, slider } = loadPreload();
+  const [onValueChange] = docListeners['value-change'];
+  slider.attrs['aria-valuenow'] = '42';
+  onValueChange({ target: { id: 'volume-slider' } });
+  onValueChange({ target: { id: 'volume-slider' } });
+  slider.attrs['aria-valuenow'] = '43';
+  onValueChange({ target: { id: 'progress-bar' } });
+  onValueChange({ target: { id: 'volume-slider' } });
+  assert.deepEqual(sent, [['player:volume-changed', 42], ['player:volume-changed', 43]]);
 });
 
 test('preload waits for DOM readiness before observing the document', () => {
+  const state = { readyState: 'loading', documentElement: null };
   const source = fs.readFileSync(path.join(__dirname, '../electron/player-preload.cjs'), 'utf8');
   let ready, observations = 0;
   const document = {
-    readyState: 'loading', documentElement: null,
-    addEventListener(event, callback) { assert.equal(event, 'DOMContentLoaded'); ready = callback; },
+    get readyState() { return state.readyState; },
+    get documentElement() { return state.documentElement; },
+    addEventListener(event, callback) { if (event === 'DOMContentLoaded') ready = callback; },
+    querySelector() { return null; },
     querySelectorAll() { return []; },
   };
   vm.runInNewContext(source, {
-    require() { return { ipcRenderer: { send() {} } }; }, document,
+    require() { return { ipcRenderer: { send() {} } }; }, document, navigator: {},
     MutationObserver: class { observe(root) { assert.ok(root); observations++; } },
     setTimeout() { return 1; }, clearTimeout() {},
   });
   assert.equal(observations, 0);
-  document.documentElement = {};
+  state.documentElement = {};
   ready();
   assert.equal(observations, 1);
 });

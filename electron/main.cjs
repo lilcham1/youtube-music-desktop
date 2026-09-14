@@ -4,7 +4,9 @@ const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const path = require('node:path');
 const { profileDirectory, migrateLegacyProfile, writeSettings } = require('./profile.cjs');
-const { applyPlayerVolume } = require('./player-volume.cjs');
+const {
+  YOUTUBE_COOKIE_DOMAIN, YOUTUBE_COOKIE_URL, withPrefVolume, engineToSliderVolume, applyPlayerVolume,
+} = require('./player-volume.cjs');
 
 const MUSIC_URL = 'https://music.youtube.com/';
 // Public Discord Application ID used by every installation. It is an
@@ -48,7 +50,6 @@ if (!hasSingleInstanceLock) {
 let mainWindow;
 let playerView;
 let settingsView;
-let playerAudioGuarded = false;
 let tray;
 let rpc;
 let rpcClientId = '';
@@ -82,19 +83,28 @@ function loadSettings() {
     if (!settings.discordAppId) settings.discordAppId = DISCORD_APPLICATION_ID;
     // v0.1.16 changed the standard window behavior: minimize keeps the app on
     // the taskbar and close exits it. Preserve any choices made afterwards.
+    let changed = false;
     if (saved.windowBehaviorVersion !== 1) {
       settings.minimizeToTray = false;
       settings.closeToTray = false;
       settings.windowBehaviorVersion = 1;
-      writeSettings(settingsPath(), settings);
+      changed = true;
     }
+    // 0.1.32 stores the volume on YouTube Music's slider scale instead of the
+    // player-engine gain. Convert once so the upgrade keeps the same loudness.
+    if (saved.volumeScale !== 'slider') {
+      settings.volume = engineToSliderVolume(settings.volume) ?? DEFAULT_SETTINGS.volume;
+      settings.volumeScale = 'slider';
+      changed = true;
+    }
+    if (changed) writeSettings(settingsPath(), settings);
   } catch (error) {
     // A missing or unreadable settings file (first run, or a corrupt/truncated
     // JSON left by an OS crash) must not stop the app from starting: fall back
     // to defaults and rewrite a valid file. Only genuine access failures
     // (EACCES/EPERM/EISDIR) are surfaced to the user as a profile problem.
     if (error.code && error.code !== 'ENOENT') throw error;
-    settings = { ...DEFAULT_SETTINGS, windowBehaviorVersion: 1 };
+    settings = { ...DEFAULT_SETTINGS, windowBehaviorVersion: 1, volumeScale: 'slider' };
     try {
       writeSettings(settingsPath(), settings);
     } catch (writeError) {
@@ -400,20 +410,16 @@ function createMainWindow() {
   });
   mainWindow.setBrowserView(playerView);
   sizeContentView();
-  // Do not expose a new Chromium audio stream until the YouTube player has
-  // received the saved volume. This prevents a full-volume blip before the
-  // Windows volume-mixer level reaches a newly-created media stream.
-  guardPlayerAudio();
-  playerView.webContents.loadURL(MUSIC_URL);
-  // Only a real main-frame page load creates a fresh audio stream. Subframe
-  // loads (ads, consent, embeds) and in-page SPA navigations happen constantly
-  // during playback; muting on those silenced the current song with nothing
-  // left to release the mute.
-  playerView.webContents.on('did-start-navigation', (details, ...legacy) => {
-    const isMainFrame = details?.isMainFrame ?? legacy[2];
-    const isSameDocument = details?.isSameDocument ?? details?.isInPlace ?? legacy[1];
-    if (isMainFrame && !isSameDocument) guardPlayerAudio();
+  // YouTube Music reads its player volume from the PREF cookie while the page
+  // is rendered, so seeding it first makes the player start at the saved
+  // level from its first frame. No mute/un-mute dance is needed, which is
+  // what previously left the stream silent when the un-mute never arrived.
+  const view = playerView;
+  void seedVolumeCookie(settings.volume).finally(() => {
+    if (view === playerView && !view.webContents.isDestroyed()) view.webContents.loadURL(MUSIC_URL);
   });
+  // Belt and braces for the cookie: if the page somehow rendered with a stale
+  // level, correct it through the player bar once the app is up.
   playerView.webContents.on('did-finish-load', () => {
     void setPlayerVolume(settings.volume);
   });
@@ -449,7 +455,18 @@ ipcMain.on('window:maximize', () => {
 ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.on('volume:set', (_event, value) => {
   const saved = saveSettings({ volume: value });
-  void setPlayerVolume(saved.volume, true);
+  void setPlayerVolume(saved.volume);
+  syncShellSettings();
+  mainWindow?.webContents.send('settings:changed', settingsSnapshot());
+});
+
+// The user moved YouTube Music's own slider. Persist it so the title bar and
+// the next launch agree with the page, without re-applying it to the player
+// (the page already did that, and echoing it back would loop).
+ipcMain.on('player:volume-changed', (event, value) => {
+  if (event.sender !== playerView?.webContents) return;
+  if (Number(value) === settings.volume) return;
+  saveSettings({ volume: value });
   syncShellSettings();
   mainWindow?.webContents.send('settings:changed', settingsSnapshot());
 });
@@ -515,54 +532,42 @@ async function readActiveTrack() {
   }
 }
 
-// A new <video> element mid-session (next track, ad, preload) shares the
-// existing audio stream: re-sync the saved level, but never re-mute. Muting
-// here left the current song silent with no event left to release it.
-ipcMain.on('player:media-attached', (event) => {
-  if (event.sender === playerView?.webContents) void setPlayerVolume(settings.volume);
-});
-
-ipcMain.on('player:volume-ready', (event) => {
-  if (event.sender === playerView?.webContents) void setPlayerVolume(settings.volume, false, true);
-});
-
-// Upper bound on how long a fresh page load may stay muted. A brief
-// full-volume blip is recoverable; a player that never unmutes is not.
-const AUDIO_GUARD_TIMEOUT_MS = 4000;
-let audioGuardTimer;
-
-function releasePlayerAudio() {
-  if (audioGuardTimer) clearTimeout(audioGuardTimer);
-  audioGuardTimer = undefined;
-  if (!playerAudioGuarded) return;
-  playerAudioGuarded = false;
-  if (playerView && !playerView.webContents.isDestroyed()) playerView.webContents.setAudioMuted(false);
-}
-
-function guardPlayerAudio() {
+// Store the saved level in the cookie YouTube Music itself reads, preserving
+// every other PREF field (locale, autoplay flags, ...) the site may have set.
+async function seedVolumeCookie(value) {
   if (!playerView || playerView.webContents.isDestroyed()) return;
-  playerAudioGuarded = true;
-  playerView.webContents.setAudioMuted(true);
-  if (audioGuardTimer) clearTimeout(audioGuardTimer);
-  audioGuardTimer = setTimeout(releasePlayerAudio, AUDIO_GUARD_TIMEOUT_MS);
-}
-
-async function setPlayerVolume(value, unmute = false, releaseAudio = false) {
-  if (!playerView || playerView.webContents.isDestroyed()) return;
-  const volume = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  const cookies = playerView.webContents.session.cookies;
   try {
-    const applied = await playerView.webContents.executeJavaScript(
-      `(${applyPlayerVolume.toString()})(${volume}, ${Boolean(unmute)})`, true,
+    // YouTube sets PREF on .youtube.com; prefer that over any host-only copy.
+    const found = await cookies.get({ name: 'PREF', domain: 'youtube.com' });
+    const existing = found.find((cookie) => cookie.domain === YOUTUBE_COOKIE_DOMAIN) ?? found[0];
+    const pref = withPrefVolume(existing?.value, value);
+    if (existing?.value === pref) return;
+    await cookies.set({
+      url: YOUTUBE_COOKIE_URL,
+      name: 'PREF',
+      value: pref,
+      domain: YOUTUBE_COOKIE_DOMAIN,
+      path: '/',
+      secure: true,
+      sameSite: 'no_restriction',
+      expirationDate: Math.floor(Date.now() / 1000) + 2 * 365 * 24 * 60 * 60,
+    });
+  } catch (error) {
+    console.warn('Unable to seed YouTube Music volume cookie:', error.message);
+  }
+}
+
+async function setPlayerVolume(value) {
+  if (!playerView || playerView.webContents.isDestroyed()) return false;
+  const volume = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  void seedVolumeCookie(volume);
+  try {
+    return await playerView.webContents.executeJavaScript(
+      `(${applyPlayerVolume.toString()})(${volume})`, true,
     );
-    // volume-ready means audible playback is imminent. Release the guard even
-    // if the engine did not echo the exact level back (normalization, a muted
-    // engine, or #movie_player not upgraded yet all make `applied` false
-    // without meaning the stream should stay silent).
-    if (releaseAudio) releasePlayerAudio();
-    return applied;
   } catch (error) {
     console.warn('Unable to apply player volume:', error.message);
-    if (releaseAudio) releasePlayerAudio();
     return false;
   }
 }
