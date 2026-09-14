@@ -36,6 +36,19 @@ npm run package:desktop
 
 The NSIS installer is created in `dist/`.
 
+## Playback regression checks
+
+Run `npm test` for volume mapping, mute behavior, preload readiness, and profile
+persistence tests. Numeric volume is applied through the playback engine, not
+YouTube Music's nonlinear slider. Per-song loudness normalization remains intact.
+
+For an opt-in live test, close the app, launch it with
+`--remote-debugging-address=127.0.0.1 --remote-debugging-port=9231`, load a song,
+then run `node scripts/test-player-live.cjs`. This starts playback, tests levels
+0–4, mute/pause, seeking, a track transition and two minutes of minimized
+playback. It leaves the saved volume at 1. Close and reopen normally afterward
+to disable debugging. Debugging is never enabled by the app itself.
+
 ## Discord Rich Presence
 
 1. Create a Discord application in the [Discord Developer Portal](https://discord.com/developers/applications).

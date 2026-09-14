@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld('youtubeMusicSettings', {
   installUpdate: () => ipcRenderer.invoke('updates:install'),
   close: () => ipcRenderer.send('settings:close'),
   quit: () => ipcRenderer.send('settings:quit'),
+  onDiscordStatus: (callback) => ipcRenderer.on('discord:status', (_event, status) => callback(status)),
   onUpdateStatus: (callback) => ipcRenderer.on('updates:status', (_event, status) => callback(status)),
 });

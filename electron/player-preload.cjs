@@ -42,17 +42,13 @@ function attachVideoEvents() {
   document.querySelectorAll('video').forEach((video) => {
     if (video.dataset.ytmDesktopPlayback === 'true') return;
     video.dataset.ytmDesktopPlayback = 'true';
-    const recoverStream = () => {
-      // A deliberate pause normally has a healthy readyState. Only retry when
-      // the media pipeline reports a genuine buffering/error condition.
-      if (video.ended || video.readyState >= 3 || !video.currentTime) return;
-      setTimeout(() => {
-        if (!video.ended && video.paused && video.readyState < 3) {
-          void video.play().catch(() => {});
-        }
-      }, 1200);
-    };
-    ['stalled', 'waiting', 'error'].forEach((event) => video.addEventListener(event, recoverStream));
+    // A new media element or track can arrive after did-finish-load. Restore
+    // through the player engine, never through an independent volume watchdog.
+    ipcRenderer.send('player:media-attached');
+    const syncVolume = () => ipcRenderer.send('player:volume-ready');
+    // loadedmetadata happens before audible playback. The main process keeps
+    // the Chromium stream muted until this exact volume sync completes.
+    ['loadedmetadata', 'playing'].forEach((event) => video.addEventListener(event, syncVolume));
     ['play', 'playing', 'pause', 'ended', 'loadedmetadata', 'emptied', 'seeking', 'seeked', 'ratechange'].forEach((event) => {
       video.addEventListener(event, schedulePlaybackReport);
     });
@@ -86,6 +82,11 @@ function scheduleInstall() {
   }, 150);
 }
 
-new MutationObserver(scheduleInstall).observe(document.documentElement, { childList: true, subtree: true });
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
-else install();
+function start() {
+  // Electron preloads run before the page DOM exists. Observing a null root
+  // throws and prevents every playback/volume listener from being installed.
+  new MutationObserver(scheduleInstall).observe(document.documentElement, { childList: true, subtree: true });
+  install();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+else start();

@@ -68,6 +68,7 @@
         document.querySelector('#minimize-to-tray').checked = Boolean(settings.minimizeToTray);
         document.querySelector('#close-to-tray').checked = Boolean(settings.closeToTray);
         document.querySelector('#discord-enabled').checked = Boolean(settings.discordEnabled);
+        if (section === 'discord') status.textContent = settings.discordStatus || '';
         document.querySelector('#version').textContent = 'Installed version ' + (settings.version || 'unknown') + '.';
       });
 
@@ -91,6 +92,9 @@
       };
       api.getUpdateStatus().then(renderUpdateStatus);
       api.onUpdateStatus(renderUpdateStatus);
+      api.onDiscordStatus((message) => {
+        if (section === 'discord') status.textContent = message || '';
+      });
       updateButton.addEventListener('click', () => {
         if (updateButton.textContent === 'Restart and install') api.installUpdate();
         else api.checkForUpdates();
@@ -99,7 +103,7 @@
         const enabled = document.querySelector('#discord-enabled').checked;
         try {
           await api.save({ discordEnabled: enabled });
-          status.textContent = enabled ? 'Enabled' : 'Disabled';
+          status.textContent = enabled ? 'Connecting when music plays…' : 'Disabled';
         } catch { status.textContent = 'Discord is not available.'; }
       };
       document.querySelector('#discord-enabled').addEventListener('change', saveDiscord);

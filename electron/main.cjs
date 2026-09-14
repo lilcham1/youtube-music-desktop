@@ -4,6 +4,7 @@ const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const path = require('node:path');
 const { profileDirectory, migrateLegacyProfile, writeSettings } = require('./profile.cjs');
+const { applyPlayerVolume } = require('./player-volume.cjs');
 
 const MUSIC_URL = 'https://music.youtube.com/';
 // Public Discord Application ID used by every installation. It is an
@@ -47,9 +48,14 @@ if (!hasSingleInstanceLock) {
 let mainWindow;
 let playerView;
 let settingsView;
+let playerAudioGuarded = false;
 let tray;
 let rpc;
 let rpcClientId = '';
+let discordRetryTimer;
+let discordRetryAttempt = 0;
+let discordSyncInFlight = false;
+let discordStatus = 'Off';
 let settings = { ...DEFAULT_SETTINGS };
 let playback = {
   playing: false,
@@ -122,7 +128,30 @@ function settingsSnapshot() {
     ...settings,
     version: app.getVersion(),
     startWithWindows: app.getLoginItemSettings().openAtLogin,
+    discordStatus,
   };
+}
+
+function setDiscordStatus(message) {
+  discordStatus = message;
+  settingsView?.webContents.send('discord:status', message);
+}
+
+function stopDiscordRetry() {
+  if (discordRetryTimer) clearTimeout(discordRetryTimer);
+  discordRetryTimer = undefined;
+  discordRetryAttempt = 0;
+}
+
+function scheduleDiscordRetry() {
+  if (discordRetryTimer || !settings.discordEnabled || !playback.playing || !playback.title) return;
+  const delay = Math.min(30_000, 5_000 * (2 ** discordRetryAttempt));
+  discordRetryAttempt = Math.min(discordRetryAttempt + 1, 3);
+  setDiscordStatus(`Discord is busy. Retrying in ${Math.ceil(delay / 1000)} seconds…`);
+  discordRetryTimer = setTimeout(() => {
+    discordRetryTimer = undefined;
+    void syncDiscord();
+  }, delay);
 }
 
 function syncShellSettings() {
@@ -251,6 +280,12 @@ async function ensureDiscord() {
 
 async function syncDiscord() {
   if (!settings.discordEnabled || !playback.playing || !playback.title) {
+    if (!settings.discordEnabled) {
+      stopDiscordRetry();
+      setDiscordStatus('Off');
+    } else {
+      setDiscordStatus('Waiting for a song to play.');
+    }
     if (rpc && lastActivityKey) {
       lastActivityKey = '';
       try { await rpc.clearActivity(); } catch {}
@@ -258,16 +293,19 @@ async function syncDiscord() {
     return;
   }
 
+  if (discordSyncInFlight) return;
+
   const activityKey = [playback.title, playback.artist, playback.album, playback.startedAt].join('|');
   if (activityKey === lastActivityKey && rpc && rpcClientId === settings.discordAppId) return;
 
+  discordSyncInFlight = true;
   try {
     const client = await ensureDiscord();
     if (!client || !playback.playing) return;
     // discord-rpc's setActivity helper drops activity.type and nested assets.
     // Use Discord's SET_ACTIVITY schema directly so this renders as Listening
     // with the real album image instead of a generic game activity.
-    await client.request('SET_ACTIVITY', {
+    const activity = {
       pid: process.pid,
       activity: {
         type: 2,
@@ -296,11 +334,24 @@ async function syncDiscord() {
         },
         instance: false,
       },
-    });
+    };
+    try {
+      await client.request('SET_ACTIVITY', activity);
+    } catch (error) {
+      // Artwork URLs require Discord-side asset support. Never let an artwork
+      // issue hide the entire status: retry with a standards-only activity.
+      const fallback = structuredClone(activity);
+      delete fallback.activity.assets;
+      await client.request('SET_ACTIVITY', fallback);
+    }
     lastActivityKey = activityKey;
-  } catch {
-    // Discord may be closed. The next genuine track/playback event retries it.
+    stopDiscordRetry();
+    setDiscordStatus('Connected — showing the current song.');
+  } catch (error) {
     await disconnectDiscord();
+    scheduleDiscordRetry();
+  } finally {
+    discordSyncInFlight = false;
   }
 }
 
@@ -349,9 +400,22 @@ function createMainWindow() {
   });
   mainWindow.setBrowserView(playerView);
   sizeContentView();
+  // Do not expose a new Chromium audio stream until the YouTube player has
+  // received the saved volume. This prevents a full-volume blip before the
+  // Windows volume-mixer level reaches a newly-created media stream.
+  guardPlayerAudio();
   playerView.webContents.loadURL(MUSIC_URL);
+  // Only a real main-frame page load creates a fresh audio stream. Subframe
+  // loads (ads, consent, embeds) and in-page SPA navigations happen constantly
+  // during playback; muting on those silenced the current song with nothing
+  // left to release the mute.
+  playerView.webContents.on('did-start-navigation', (details, ...legacy) => {
+    const isMainFrame = details?.isMainFrame ?? legacy[2];
+    const isSameDocument = details?.isSameDocument ?? details?.isInPlace ?? legacy[1];
+    if (isMainFrame && !isSameDocument) guardPlayerAudio();
+  });
   playerView.webContents.on('did-finish-load', () => {
-    setTimeout(() => { void setPlayerVolume(settings.volume); }, 600);
+    void setPlayerVolume(settings.volume);
   });
   playerView.webContents.on('media-started-playing', () => { void readActiveTrack(); });
   playerView.webContents.on('media-paused', () => {
@@ -385,7 +449,7 @@ ipcMain.on('window:maximize', () => {
 ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.on('volume:set', (_event, value) => {
   const saved = saveSettings({ volume: value });
-  void setPlayerVolume(saved.volume);
+  void setPlayerVolume(saved.volume, true);
   syncShellSettings();
   mainWindow?.webContents.send('settings:changed', settingsSnapshot());
 });
@@ -451,31 +515,56 @@ async function readActiveTrack() {
   }
 }
 
-async function setPlayerVolume(value) {
+// A new <video> element mid-session (next track, ad, preload) shares the
+// existing audio stream: re-sync the saved level, but never re-mute. Muting
+// here left the current song silent with no event left to release it.
+ipcMain.on('player:media-attached', (event) => {
+  if (event.sender === playerView?.webContents) void setPlayerVolume(settings.volume);
+});
+
+ipcMain.on('player:volume-ready', (event) => {
+  if (event.sender === playerView?.webContents) void setPlayerVolume(settings.volume, false, true);
+});
+
+// Upper bound on how long a fresh page load may stay muted. A brief
+// full-volume blip is recoverable; a player that never unmutes is not.
+const AUDIO_GUARD_TIMEOUT_MS = 4000;
+let audioGuardTimer;
+
+function releasePlayerAudio() {
+  if (audioGuardTimer) clearTimeout(audioGuardTimer);
+  audioGuardTimer = undefined;
+  if (!playerAudioGuarded) return;
+  playerAudioGuarded = false;
+  if (playerView && !playerView.webContents.isDestroyed()) playerView.webContents.setAudioMuted(false);
+}
+
+function guardPlayerAudio() {
+  if (!playerView || playerView.webContents.isDestroyed()) return;
+  playerAudioGuarded = true;
+  playerView.webContents.setAudioMuted(true);
+  if (audioGuardTimer) clearTimeout(audioGuardTimer);
+  audioGuardTimer = setTimeout(releasePlayerAudio, AUDIO_GUARD_TIMEOUT_MS);
+}
+
+async function setPlayerVolume(value, unmute = false, releaseAudio = false) {
   if (!playerView || playerView.webContents.isDestroyed()) return;
   const volume = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
-  // A linear 1–4% gain is effectively silent on many speakers. Keep the
-  // numeric control intuitive while applying a gentle perceptual curve.
-  const playerVolume = volume === 0 ? 0 : Math.round(Math.pow(volume / 100, 0.7) * 100);
   try {
-    await playerView.webContents.executeJavaScript(`(() => {
-      const find = (selector, root = document) => {
-        const direct = root.querySelector?.(selector);
-        if (direct) return direct;
-        for (const element of root.querySelectorAll?.('*') || []) {
-          if (element.shadowRoot) { const nested = find(selector, element.shadowRoot); if (nested) return nested; }
-        }
-        return null;
-      };
-      const slider = find('#volume-slider') || find('paper-slider#volume-slider') || find('input[type="range"]');
-      const player = find('ytmusic-player-bar');
-      const playerVolume = ${playerVolume};
-      if (typeof player?.updateVolume === 'function') player.updateVolume(playerVolume);
-      if (slider) { slider.value = playerVolume; slider.dispatchEvent(new Event('input', { bubbles: true })); slider.dispatchEvent(new Event('change', { bubbles: true })); }
-      const video = find('video');
-      if (video) video.volume = playerVolume / 100;
-    })()`, true);
-  } catch {}
+    const applied = await playerView.webContents.executeJavaScript(
+      `(${applyPlayerVolume.toString()})(${volume}, ${Boolean(unmute)})`, true,
+    );
+    // volume-ready means audible playback is imminent. Release the guard even
+    // if the engine did not echo the exact level back (normalization, a muted
+    // engine, or #movie_player not upgraded yet all make `applied` false
+    // without meaning the stream should stay silent).
+    if (releaseAudio) releasePlayerAudio();
+    return applied;
+  } catch (error) {
+    console.warn('Unable to apply player volume:', error.message);
+    if (releaseAudio) releasePlayerAudio();
+    return false;
+  }
 }
 
 ipcMain.on('playback', (_event, next) => {
