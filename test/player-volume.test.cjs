@@ -4,8 +4,23 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  withPrefVolume, prefVolume, engineToSliderVolume, applyPlayerVolume,
+  withPrefVolume, prefVolume, engineToSliderVolume, audibleVolume, applyPlayerVolume,
 } = require('../electron/player-volume.cjs');
+
+test('a non-zero level is never inside the slider dead zone (1–4 → silent)', () => {
+  assert.equal(audibleVolume(0), 0);
+  for (const level of [1, 2, 3, 4]) assert.equal(audibleVolume(level), 5, `level ${level}`);
+  assert.equal(audibleVolume(5), 5);
+  assert.equal(audibleVolume(42), 42);
+  assert.equal(audibleVolume('x'), undefined);
+  // The cookie seed applies the same floor: an old engine-scale "1" left by a
+  // downgraded build must still be audible on first launch.
+  assert.equal(withPrefVolume('tz=UTC', 1), 'tz=UTC&volume=5');
+  assert.equal(withPrefVolume('tz=UTC', 0), 'tz=UTC&volume=0');
+  for (let engine = 1; engine <= 100; engine++) {
+    assert.ok(engineToSliderVolume(engine) >= 5, `engine ${engine} must migrate to an audible slider level`);
+  }
+});
 
 test('PREF cookie: volume is added, replaced, and other fields are preserved', () => {
   assert.equal(withPrefVolume(undefined, 42), 'volume=42');
@@ -55,7 +70,7 @@ test('applyPlayerVolume uses the player bar API with a clamped integer level', (
   assert.equal(apply(2.6), true);
   assert.equal(apply(-10), true);
   assert.equal(apply(120), true);
-  assert.deepEqual(calls, [42, 3, 0, 100]);
+  assert.deepEqual(calls, [42, 5, 0, 100], '2.6 rounds to 3, which is silent, so it is lifted to 5');
   assert.equal(apply('invalid'), false);
   assert.equal(calls.length, 4);
 });

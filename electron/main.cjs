@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { profileDirectory, migrateLegacyProfile, writeSettings } = require('./profile.cjs');
 const {
-  YOUTUBE_COOKIE_DOMAIN, YOUTUBE_COOKIE_URL, withPrefVolume, engineToSliderVolume, applyPlayerVolume,
+  YOUTUBE_COOKIE_DOMAIN, YOUTUBE_COOKIE_URL, withPrefVolume, engineToSliderVolume, audibleVolume, applyPlayerVolume,
 } = require('./player-volume.cjs');
 
 const MUSIC_URL = 'https://music.youtube.com/';
@@ -90,13 +90,18 @@ function loadSettings() {
       settings.windowBehaviorVersion = 1;
       changed = true;
     }
-    // 0.1.32 stores the volume on YouTube Music's slider scale instead of the
-    // player-engine gain. Convert once so the upgrade keeps the same loudness.
-    if (saved.volumeScale !== 'slider') {
+    // 0.1.32+ stores the volume on YouTube Music's slider scale instead of the
+    // player-engine gain. Older builds preserve unknown keys, so a marker alone
+    // cannot tell whether an old build wrote the value after an upgrade; the
+    // slider copy must also still match. Convert when either check fails so
+    // the loudness carries over instead of landing in the slider's dead zone.
+    if (saved.volumeScale !== 'slider' || saved.sliderVolume !== saved.volume) {
       settings.volume = engineToSliderVolume(settings.volume) ?? DEFAULT_SETTINGS.volume;
       settings.volumeScale = 'slider';
       changed = true;
     }
+    settings.volume = audibleVolume(settings.volume) ?? DEFAULT_SETTINGS.volume;
+    if (settings.sliderVolume !== settings.volume) { settings.sliderVolume = settings.volume; changed = true; }
     if (changed) writeSettings(settingsPath(), settings);
   } catch (error) {
     // A missing or unreadable settings file (first run, or a corrupt/truncated
@@ -104,7 +109,7 @@ function loadSettings() {
     // to defaults and rewrite a valid file. Only genuine access failures
     // (EACCES/EPERM/EISDIR) are surfaced to the user as a profile problem.
     if (error.code && error.code !== 'ENOENT') throw error;
-    settings = { ...DEFAULT_SETTINGS, windowBehaviorVersion: 1, volumeScale: 'slider' };
+    settings = { ...DEFAULT_SETTINGS, windowBehaviorVersion: 1, volumeScale: 'slider', sliderVolume: DEFAULT_SETTINGS.volume };
     try {
       writeSettings(settingsPath(), settings);
     } catch (writeError) {
@@ -127,7 +132,8 @@ function saveSettings(next) {
     app.setLoginItemSettings({ openAtLogin: settings.startWithWindows, openAsHidden: true });
   }
   if (next.volume !== undefined && Number.isFinite(Number(next.volume))) {
-    settings.volume = Math.max(0, Math.min(100, Math.round(Number(next.volume))));
+    settings.volume = audibleVolume(next.volume);
+    settings.sliderVolume = settings.volume;
   }
   writeSettings(settingsPath(), settings);
   return settings;

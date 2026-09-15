@@ -13,11 +13,21 @@ function clampVolume(value) {
   return Math.max(0, Math.min(100, Math.round(volume)));
 }
 
+// YouTube's slider maps 1–4 to engine gain 0. A non-zero level must never be
+// silent, so anything in that dead zone becomes the quietest audible step.
+// This also makes an engine-scale "1" written by an older build audible.
+const MIN_AUDIBLE_SLIDER = 5;
+function audibleVolume(value) {
+  const level = clampVolume(value);
+  if (level === undefined) return undefined;
+  return level > 0 && level < MIN_AUDIBLE_SLIDER ? MIN_AUDIBLE_SLIDER : level;
+}
+
 // PREF is an '&'-separated list of key=value pairs shared by every YouTube
 // property (e.g. "f6=40000000&tz=Europe.Paris&volume=42"). Only the volume
 // field is ours to change.
 function withPrefVolume(existing, volume) {
-  const level = clampVolume(volume);
+  const level = audibleVolume(volume);
   const fields = String(existing || '')
     .split('&')
     .filter((field) => field && !field.startsWith('volume='));
@@ -57,7 +67,8 @@ function prefVolume(pref) {
 function applyPlayerVolume(value) {
   const volume = Number(value);
   if (!Number.isFinite(volume)) return false;
-  const level = Math.max(0, Math.min(100, Math.round(volume)));
+  let level = Math.max(0, Math.min(100, Math.round(volume)));
+  if (level > 0 && level < 5) level = 5; // slider 1–4 is silent on YouTube's curve
   const bar = document.querySelector('ytmusic-player-bar');
   if (typeof bar?.updateVolume !== 'function') return false;
   bar.updateVolume(level);
@@ -68,6 +79,8 @@ module.exports = {
   YOUTUBE_COOKIE_DOMAIN,
   YOUTUBE_COOKIE_URL,
   clampVolume,
+  audibleVolume,
+  MIN_AUDIBLE_SLIDER,
   withPrefVolume,
   prefVolume,
   engineToSliderVolume,
