@@ -1,3 +1,9 @@
+# Audio history (Electron releases)
+
+Investigation notes from the Electron 0.1.x releases, kept for context. Since 0.2.0 (the Go rewrite) the app stores the player engine level and applies it with `#movie_player.setVolume`; see the Volume section of the README. On 2026-10-01 YouTube Music was serving a new mini-player UI with a linear volume slider and no `ytmusic-player-bar`, which the Electron approach below relied on.
+
+---
+
 # Audio verification — 0.1.32
 
 Investigated on 2026-09-14 against music.youtube.com in an Electron 44 view.
