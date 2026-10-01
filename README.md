@@ -4,58 +4,76 @@ A compact, personal Windows desktop player for the official YouTube Music websit
 
 > Unofficial personal project. It is not affiliated with, endorsed by, or sponsored by YouTube, Google, or Discord.
 
+Written in Go with [Wails v3](https://v3.wails.io/) on Windows' built-in WebView2 (Edge) runtime. The installer is about 4 MB and the installed app about 13 MB.
+
 ## Included
 
-- One native Electron window, with no browser tab or second visible helper app
+- One window with a custom dark title bar, no browser tab or helper app
 - Persistent official YouTube Music sign-in inside the app
-- Numeric `0–100` volume control
+- Numeric `0–100` volume control that remembers its level across launches
 - System-tray controls: open, settings, Discord settings, and quit
 - Startup and minimize/close-to-tray preferences
 - Optional Discord Rich Presence that publishes only while music is playing
   - compact status: artist
   - card: song title, artist, artwork, and position-aware timer
+- In-app updates from GitHub releases
 
 ## Requirements
 
-- Windows 10 or 11
-- Node.js 20+
+- Windows 10 or 11 with the WebView2 runtime (built into Windows 11)
+- Go 1.25+ to build
 - Discord desktop client, only if Rich Presence is enabled
 
 ## Run locally
 
 ```powershell
-npm install
-npm run desktop
+go run .
 ```
 
 ## Build an installer
 
+Needs [go-winres](https://github.com/tc-hib/go-winres) (`go install github.com/tc-hib/go-winres@latest`) and [NSIS](https://nsis.sourceforge.io/) (`winget install NSIS.NSIS`).
+
 ```powershell
-npm run package:desktop
+.\build.ps1 -Version 0.2.0
 ```
 
-The NSIS installer is created in `dist/`.
+This runs the tests, then writes `dist\YouTube Music.exe`, `dist\YouTube-Music-Setup-0.2.0.exe` and `dist\latest.yml`. The installer is per-user, installs to `%LOCALAPPDATA%\Programs\YouTube Music` and replaces an Electron 0.1.x install in place. Pushing a `v*` tag builds and publishes a release from GitHub Actions.
 
-## Playback regression checks
+## Where things live
 
-Run `npm test` for volume cookie handling, slider round-trips, preload readiness,
-and profile persistence tests. The title-bar volume is YouTube Music's own 0–100
-slider value: it is seeded into the `PREF` cookie before the page loads (so the
-player starts at that level from its first frame) and applied live through the
-player bar's `updateVolume`. The app never mutes or un-mutes the audio stream
-itself, and never writes the engine or media volume behind YouTube's back.
+| Path | Contents |
+|---|---|
+| `%USERPROFILE%\.youtube-music\settings.json` | App settings (shared with the Electron releases) |
+| `%USERPROFILE%\.youtube-music\webview2\` | YouTube sign-in and site data |
+| `main.go` | Windows, tray, settings and messaging |
+| `presence.go`, `internal/discord` | Discord Rich Presence (local IPC, no secret) |
+| `frontend/player.js` | Script injected into music.youtube.com |
+| `frontend/shell.html`, `frontend/settings.html` | Title bar and settings pages |
 
-For an opt-in live test, close the app, launch it with
-`--remote-debugging-address=127.0.0.1 --remote-debugging-port=9231`, load a song,
-then run `node scripts/test-player-live.cjs`. This starts playback, tests several
-levels including 0, a slider round-trip, pause, seeking, a track transition and
-two minutes of minimized playback. It leaves the saved volume at 10. Close and reopen normally afterward
-to disable debugging. Debugging is never enabled by the app itself.
+The title bar is its own window. The YouTube Music and settings webviews are attached below it as Win32 child windows, so the site's own layout is never modified.
+
+## Volume
+
+The app stores the player *engine* level (`#movie_player.getVolume()`, what you actually hear) and applies it with `#movie_player.setVolume`, which exists in both of YouTube Music's current player UIs. Before playback starts it seeds YouTube's own `PREF` cookie (`volume=N`, on the old slider curve) and reloads once, so the player starts at the saved level from its first frame. If YouTube changes the level on its own it is put back; a change you make in the page (slider, keyboard) is followed and saved. The app never mutes, pauses or plays media and never writes the `<video>` element's volume.
+
+## Tests
+
+```powershell
+go test ./...
+```
+
+Covers settings migration from every Electron release, the volume curve, the Discord IPC protocol (against a fake Discord), the updater, and invariants of the injected script.
+
+For a live check, start the app with a loopback debugging port, play something, and run the end-to-end script (requires Node.js):
+
+```powershell
+$env:YTM_DEBUG_PORT = 9233; go run .
+node scripts\live-test.mjs
+```
+
+It verifies the starting level, title bar → page, a YouTube-initiated change being reverted, an in-page change being saved, and a track change, then restores the original level.
 
 ## Discord Rich Presence
 
-1. Create a Discord application in the [Discord Developer Portal](https://discord.com/developers/applications).
-2. Copy its Application ID.
-3. In the app, select the Discord icon in the title bar, enable Rich Presence, paste the ID, and save.
-
-No Discord client secret is needed or stored. The app communicates only with the running local Discord desktop client.
+Select the Discord icon in the title bar and enable Rich Presence. No Discord application ID or client secret needs to be entered; the app talks only to the Discord desktop client running on the same PC.

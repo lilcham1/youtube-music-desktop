@@ -13,16 +13,19 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-go@v5
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run package:desktop -- --publish never
-      - name: Attach Windows update files
+          go-version-file: go.mod
+      - name: Install build tools
+        run: |
+          go install github.com/tc-hib/go-winres@latest
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) { choco install nsis -y --no-progress }
+          "C:\Program Files (x86)\NSIS" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build
+        run: .\build.ps1 -Version $env:GITHUB_REF_NAME.TrimStart('v')
+      - name: Attach installer and update feed
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/YouTube Music Setup *.exe
-            dist/YouTube Music Setup *.exe.blockmap
+            dist/YouTube-Music-Setup-*.exe
             dist/latest.yml

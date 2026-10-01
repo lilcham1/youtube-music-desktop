@@ -1,6 +1,8 @@
-node_modules/
 dist/
-src-tauri/target/
+*.syso
+node_modules/
+
+# Leftovers from the retired Tauri version (not part of the app).
 src-tauri/
 src/
 edge-extension/
