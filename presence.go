@@ -37,25 +37,34 @@ type presence struct {
 	playback Playback
 	status   string
 
-	kick     chan struct{}
-	retryDue chan struct{}
+	kick        chan struct{}
+	retryDue    chan struct{}
+	throttleDue chan struct{}
 
 	// Owned by the worker goroutine.
 	client       *discord.Client
 	lastKey      string
+	lastSent     time.Time
+	throttled    bool
 	retryAttempt int
 	retryTimer   *time.Timer
 }
+
+// minActivityInterval spaces out SET_ACTIVITY calls. Seeking fires bursts of
+// playback reports; Discord rate-limits rapid updates, so the latest state
+// is sent once the interval has passed.
+const minActivityInterval = 2 * time.Second
 
 func newPresence(onStatus func(string)) *presence {
 	p := &presence{
 		dial: func(path string, timeout time.Duration) (net.Conn, error) {
 			return winio.DialPipe(path, &timeout)
 		},
-		onStatus: onStatus,
-		status:   "Off",
-		kick:     make(chan struct{}, 1),
-		retryDue: make(chan struct{}, 1),
+		onStatus:    onStatus,
+		status:      "Off",
+		kick:        make(chan struct{}, 1),
+		retryDue:    make(chan struct{}, 1),
+		throttleDue: make(chan struct{}, 1),
 	}
 	go p.run()
 	return p
@@ -106,14 +115,6 @@ func (p *presence) Update(next Playback) {
 	p.poke()
 }
 
-// Paused marks playback as paused without losing the track.
-func (p *presence) Paused() {
-	p.mu.Lock()
-	p.playback.Playing = false
-	p.mu.Unlock()
-	p.poke()
-}
-
 func (p *presence) poke() {
 	select {
 	case p.kick <- struct{}{}:
@@ -127,6 +128,8 @@ func (p *presence) run() {
 		case <-p.kick:
 		case <-p.retryDue:
 			p.retryTimer = nil
+		case <-p.throttleDue:
+			p.throttled = false
 		}
 		p.sync()
 	}
@@ -187,6 +190,18 @@ func (p *presence) sync() {
 	if key == p.lastKey && p.client != nil && p.client.AppID() == appID {
 		return
 	}
+	if wait := minActivityInterval - time.Since(p.lastSent); wait > 0 {
+		if !p.throttled {
+			p.throttled = true
+			time.AfterFunc(wait, func() {
+				select {
+				case p.throttleDue <- struct{}{}:
+				default:
+				}
+			})
+		}
+		return
+	}
 	if p.client != nil && p.client.AppID() != appID {
 		p.disconnect()
 	}
@@ -202,6 +217,7 @@ func (p *presence) sync() {
 	if pb.DurationSeconds > 0 && pb.startedAtMs > 0 {
 		track.EndMs = pb.startedAtMs + int64(pb.DurationSeconds*1000)
 	}
+	p.lastSent = time.Now()
 	if err := p.client.SetActivity(track); err != nil {
 		_ = p.client.Close()
 		p.client = nil

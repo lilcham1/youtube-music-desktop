@@ -12,7 +12,15 @@
       .brand-mark { position: relative; display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; background: #ff2c3b; }
       .brand-mark::before { content:""; position:absolute; width:11px; height:11px; border:1.6px solid #fff; border-radius:50%; }
       .brand-mark i { position:relative; z-index:1; width: 0; height: 0; margin-left: 2px; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 5px solid #fff; }
-      .space { flex: 1; }
+      .space { flex: 1; align-self: stretch; }
+      /* Resize cursors on the window edges; set by the script below. */
+      html[data-edge="n-resize"] *, html[data-edge="s-resize"] * { cursor: ns-resize !important; }
+      html[data-edge="e-resize"] *, html[data-edge="w-resize"] * { cursor: ew-resize !important; }
+      html[data-edge="nw-resize"] *, html[data-edge="se-resize"] * { cursor: nwse-resize !important; }
+      html[data-edge="ne-resize"] *, html[data-edge="sw-resize"] * { cursor: nesw-resize !important; }
+      .restore-icon { display: none; }
+      html.maximized .restore-icon { display: block; }
+      html.maximized .maximize-icon { display: none; }
       .actions { height: 100%; display: flex; align-items: center; --wails-draggable: no-drag; }
       button { height: 100%; width: 42px; display: grid; place-items: center; color: #d8d8d8; border: 0; background: transparent; cursor: pointer; }
       button:hover { background: #252525; color: #fff; }
@@ -35,7 +43,7 @@
         <button class="tool" id="discord" title="Discord Rich Presence" aria-label="Discord Rich Presence"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 4.9A16.4 16.4 0 0 0 15.4 3l-.5 1a15.1 15.1 0 0 0-5.8 0l-.5-1a16.4 16.4 0 0 0-4.1 1.9C1.9 8.7 1.2 12.4 1.6 16a16.5 16.5 0 0 0 5 2.5l1.2-1.6a9.3 9.3 0 0 1-1.8-.9l.4-.3c3.5 1.6 7.6 1.6 11.1 0l.4.3c-.6.4-1.2.7-1.8.9l1.2 1.6a16.5 16.5 0 0 0 5-2.5c.5-4.2-.8-7.9-2.8-11.1ZM8.5 13.7c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2Zm7 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2Z"/></svg></button>
         <button class="tool" id="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.7 7.7 0 0 0 0-2l2-1.6-2-3.5-2.4 1a7.4 7.4 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.5L6.4 11a7.7 7.7 0 0 0 0 2l-2 1.6 2 3.5 2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.5-2-1.6ZM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg></button>
         <button class="window" id="minimize" title="Minimize"><svg viewBox="0 0 12 12"><path d="M2 6h8"/></svg></button>
-        <button class="window" id="maximize" title="Maximize"><svg viewBox="0 0 12 12"><rect x="2.3" y="2.3" width="7.4" height="7.4"/></svg></button>
+        <button class="window" id="maximize" title="Maximize"><svg class="maximize-icon" viewBox="0 0 12 12"><rect x="2.3" y="2.3" width="7.4" height="7.4"/></svg><svg class="restore-icon" viewBox="0 0 12 12"><rect x="2.3" y="3.9" width="5.8" height="5.8"/><path d="M3.9 3.9V2.3h5.8v5.8H8.1"/></svg></button>
         <button class="window" id="close" title="Close"><svg viewBox="0 0 12 12"><path d="m2.4 2.4 7.2 7.2m0-7.2-7.2 7.2"/></svg></button>
       </div>
     </header>
@@ -44,13 +52,76 @@
       const volume = document.querySelector('#volume');
       const discord = document.querySelector('#discord');
       discord.classList.toggle('enabled', {{DISCORD}});
-      // Called by the app whenever settings change.
+      let maximized = false;
+      // Called by the app whenever settings or the window state change.
       window.__app = {
         state(s) {
           discord.classList.toggle('enabled', Boolean(s.discordEnabled));
           if (document.activeElement !== volume && Number.isFinite(Number(s.volume))) volume.value = String(s.volume);
+          maximized = Boolean(s.maximized);
+          document.documentElement.classList.toggle('maximized', maximized);
+          document.querySelector('#maximize').title = maximized ? 'Restore' : 'Maximize';
+          if (maximized) setEdge('');
         },
       };
+
+      // Window moving and edge resizing. Wails normally does this in a
+      // runtime script that it only loads into pages from its own asset
+      // server; this page is loaded from a string, so it does it itself and
+      // asks the app to start the native move/resize.
+      const EDGE = 6;     // matches the frame left around the YouTube view
+      const CORNER = 14;  // corner zones extend this far along each edge
+      const DRAG_THRESHOLD = 3;
+      let edge = '';
+      const setEdge = (next) => {
+        if (next === edge) return;
+        edge = next;
+        if (edge) document.documentElement.dataset.edge = edge;
+        else delete document.documentElement.dataset.edge;
+      };
+      const edgeAt = (x, y) => {
+        if (maximized) return '';
+        const w = window.innerWidth, h = window.innerHeight;
+        const top = y < EDGE - 1, bottom = y >= h - EDGE, left = x < EDGE, right = x >= w - EDGE;
+        const nearTop = y < CORNER, nearBottom = y >= h - CORNER, nearLeft = x < CORNER, nearRight = x >= w - CORNER;
+        if ((top && nearLeft) || (left && nearTop)) return 'nw-resize';
+        if ((top && nearRight) || (right && nearTop)) return 'ne-resize';
+        if ((bottom && nearLeft) || (left && nearBottom)) return 'sw-resize';
+        if ((bottom && nearRight) || (right && nearBottom)) return 'se-resize';
+        if (top) return 'n-resize';
+        if (bottom) return 's-resize';
+        if (left) return 'w-resize';
+        if (right) return 'e-resize';
+        return '';
+      };
+      const draggable = (target) => target instanceof Element && target.closest('.bar') && !target.closest('.actions');
+      let pressed = null;
+      document.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        const at = edgeAt(e.clientX, e.clientY);
+        if (at) {
+          e.preventDefault();
+          pressed = null;
+          send('resize', { edge: at });
+        } else if (draggable(e.target)) {
+          pressed = { x: e.screenX, y: e.screenY };
+        }
+      }, true);
+      document.addEventListener('mousemove', (e) => {
+        if (pressed && (e.buttons & 1)) {
+          // Start moving only after a small movement, so a double-click on
+          // the bar still maximizes.
+          if (Math.abs(e.screenX - pressed.x) > DRAG_THRESHOLD || Math.abs(e.screenY - pressed.y) > DRAG_THRESHOLD) {
+            pressed = null;
+            send('drag');
+          }
+          return;
+        }
+        pressed = null;
+        setEdge(edgeAt(e.clientX, e.clientY));
+      }, true);
+      document.addEventListener('mouseup', () => { pressed = null; }, true);
+      document.documentElement.addEventListener('mouseleave', () => setEdge(''));
       volume.addEventListener('change', () => send('volume', { value: Number(volume.value) }));
       volume.addEventListener('keydown', (e) => { if (e.key === 'Enter') volume.blur(); });
       discord.addEventListener('click', () => send('open-discord'));

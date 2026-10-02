@@ -6,7 +6,9 @@
 // Music's player UIs. Before playback starts, the PREF cookie (volume=N, old
 // slider curve) is seeded so the player initialises at that loudness.
 (() => {
-  if (window.__ytmDesktop) return;
+  // The player window also shows Google's sign-in pages; only YouTube Music
+  // gets this script.
+  if (window.__ytmDesktop || location.origin !== 'https://music.youtube.com') return;
   const send = (type, extra) => window.chrome.webview.postMessage(JSON.stringify({ type, ...extra }));
 
   const findInTree = (selector, root = document) => {
@@ -23,16 +25,23 @@
 
   // ---- Playback reporting (Discord Rich Presence) ----
 
+  // The media session normally has the track; the page search (which walks
+  // shadow roots) only runs when it does not.
+  const pageText = (...selectors) => {
+    for (const selector of selectors) {
+      const text = findInTree(selector)?.textContent?.trim();
+      if (text) return text;
+    }
+    return '';
+  };
   const trackDetails = () => {
     const metadata = navigator.mediaSession?.metadata;
-    const video = findInTree('video');
-    const playerTitle = findInTree('#song-title') || findInTree('.title.ytmusic-player-bar');
-    const playerByline = findInTree('#byline') || findInTree('.byline.ytmusic-player-bar');
-    const pageTitle = document.title.replace(/\s*[-–|]\s*YouTube Music.*$/i, '').trim();
+    const video = document.querySelector('video') || findInTree('video');
     return {
       playing: Boolean(video && !video.paused && !video.ended && video.readyState > 2),
-      title: metadata?.title || playerTitle?.textContent?.trim() || pageTitle,
-      artist: metadata?.artist || playerByline?.textContent?.trim() || '',
+      title: metadata?.title || pageText('#song-title', '.title.ytmusic-player-bar')
+        || document.title.replace(/\s*[-–|]\s*YouTube Music.*$/i, '').trim(),
+      artist: metadata?.artist || pageText('#byline', '.byline.ytmusic-player-bar'),
       album: metadata?.album || '',
       artwork: metadata?.artwork?.[metadata.artwork.length - 1]?.src || '',
       positionSeconds: video?.currentTime || 0,
@@ -130,30 +139,71 @@
     });
   };
 
+  // DOM changes only matter for new <video> elements and the player
+  // appearing; playback reports come from the media events above.
   let installQueued = false;
   const scheduleInstall = () => {
     if (installQueued) return;
     installQueued = true;
-    setTimeout(() => { installQueued = false; attachVideoEvents(); applyWantedVolume(); schedulePlaybackReport(); }, 150);
+    setTimeout(() => { installQueued = false; attachVideoEvents(); applyWantedVolume(); }, 150);
+  };
+
+  // Links that leave YouTube Music open in the default browser instead of
+  // replacing the player or opening a bare popup window. Sign-in and cookie
+  // consent stay in the app, because they set this window's session.
+  const inAppHosts = new Set(['music.youtube.com', 'accounts.google.com', 'accounts.youtube.com',
+    'consent.youtube.com', 'consent.google.com']);
+  const isExternal = (href) => {
+    try {
+      const url = new URL(href, location.href);
+      return /^https?:$/.test(url.protocol) && !inAppHosts.has(url.hostname);
+    } catch { return false; }
+  };
+  document.addEventListener('click', (event) => {
+    if (!event.isTrusted || event.defaultPrevented || event.button !== 0) return;
+    const link = event.target.closest?.('a[href]');
+    if (!link || !isExternal(link.href)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    send('open-external', { url: new URL(link.href, location.href).href });
+  }, true);
+  const pageOpen = window.open;
+  window.open = function (url, ...rest) {
+    if (url && isExternal(String(url))) {
+      send('open-external', { url: new URL(String(url), location.href).href });
+      return null;
+    }
+    return pageOpen.call(window, url, ...rest);
+  };
+
+  const setLevel = (level, prefLevel) => {
+    wantedVolume = level;
+    lastReportedVolume = level;
+    if (prefVolume() !== prefLevel) writePrefVolume(prefLevel);
   };
 
   window.__ytmDesktop = {
     // level: engine level 0–100. prefLevel: the same loudness on the PREF
     // cookie's slider curve (never 1–4, which YouTube treats as silence).
-    setVolume(level, prefLevel) {
-      wantedVolume = level;
-      lastReportedVolume = level;
-      if (prefVolume() !== prefLevel) {
-        writePrefVolume(prefLevel);
-        const reloadKey = 'ytmDesktopVolumeSeed';
-        // Reload once so the player initialises from the new cookie, but
-        // never interrupt something that is already playing.
-        if (prefVolume() === prefLevel && !mediaPlaying() && sessionStorage.getItem(reloadKey) !== String(prefLevel)) {
-          sessionStorage.setItem(reloadKey, String(prefLevel));
-          location.reload();
-          return;
-        }
+    //
+    // init runs once per page load. If the cookie had a different level it
+    // reloads once, before anything has played, so the player initialises
+    // at the saved loudness from its first frame.
+    init(level, prefLevel) {
+      const seeded = prefVolume() === prefLevel;
+      setLevel(level, prefLevel);
+      const reloadKey = 'ytmDesktopVolumeSeed';
+      if (!seeded && prefVolume() === prefLevel && lastUserInput === 0 && !mediaPlaying()
+          && sessionStorage.getItem(reloadKey) !== String(prefLevel)) {
+        sessionStorage.setItem(reloadKey, String(prefLevel));
+        location.reload();
+        return;
       }
+      applyWantedVolume();
+    },
+    // setVolume applies a new level immediately and never reloads.
+    setVolume(level, prefLevel) {
+      setLevel(level, prefLevel);
       applyWantedVolume();
     },
   };

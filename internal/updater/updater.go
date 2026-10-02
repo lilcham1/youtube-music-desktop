@@ -176,6 +176,8 @@ func (u *Updater) download(ctx context.Context, name, url string, size int64) (s
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download: %s", resp.Status)
 	}
+	// The folder only ever holds the newest installer; drop older ones.
+	_ = os.RemoveAll(u.DownloadTo)
 	if err := os.MkdirAll(u.DownloadTo, 0o755); err != nil {
 		return "", err
 	}

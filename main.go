@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -39,11 +40,15 @@ var (
 )
 
 const (
-	musicURL     = "https://music.youtube.com/"
-	appID        = "com.youtube.music.personal.desktop"
-	titleBarDIP  = 40
-	updateDelay  = 12 * time.Second
-	updatePeriod = 4 * time.Hour
+	musicURL    = "https://music.youtube.com/"
+	appID       = "com.youtube.music.personal.desktop"
+	titleBarDIP = 40
+	// Width of the frame left around the YouTube view while the window is not
+	// maximised. Wails detects resize edges in the title-bar page, so the
+	// page has to be exposed at the edges for frameless resizing to work.
+	resizeBorderDIP = 6
+	updateDelay     = 12 * time.Second
+	updatePeriod    = 4 * time.Hour
 )
 
 //go:embed frontend/shell.html frontend/settings.html frontend/player.js assets/icon.ico
@@ -65,10 +70,17 @@ type desktop struct {
 	playerJS             string
 	settingsPath, exe    string
 
-	mu       sync.Mutex
-	cfg      settings.Settings
-	quitting bool
-	attached bool
+	mu        sync.Mutex
+	cfg       settings.Settings
+	quitting  bool
+	attached  bool
+	maximized bool
+}
+
+// resizeEdges are the edge names Wails' "wails:resize:<edge>" accepts.
+var resizeEdges = map[string]bool{
+	"n-resize": true, "ne-resize": true, "e-resize": true, "se-resize": true,
+	"s-resize": true, "sw-resize": true, "w-resize": true, "nw-resize": true,
 }
 
 func main() {
@@ -155,11 +167,15 @@ func (d *desktop) createWindows(startHidden bool) {
 		HTML:             shellHTML,
 		Windows:          application.WindowsWindow{Theme: application.Dark},
 	})
+	// The child windows must not be resizable: Wails would otherwise give them
+	// a sizing frame and resize them inside the shell instead of resizing the
+	// window.
 	child := application.WindowsWindow{HiddenOnTaskbar: true, DisableFramelessWindowDecorations: true, Theme: application.Dark}
 	d.player = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "player",
 		Title:            "YouTube Music Player",
 		Frameless:        true,
+		DisableResize:    true,
 		Hidden:           true,
 		BackgroundColour: application.NewRGB(3, 3, 3),
 		URL:              musicURL,
@@ -169,6 +185,7 @@ func (d *desktop) createWindows(startHidden bool) {
 		Name:             "settings",
 		Title:            "YouTube Music Settings",
 		Frameless:        true,
+		DisableResize:    true,
 		Hidden:           true,
 		BackgroundColour: application.NewRGB(23, 23, 23),
 		HTML:             mustRead("frontend/settings.html"),
@@ -184,12 +201,24 @@ func (d *desktop) createWindows(startHidden bool) {
 			w.HandleMessage("wails:runtime:ready")
 			if w == d.player {
 				w.ExecJS(d.playerJS)
-				d.applyPlayerVolume()
+				d.applyPlayerVolume(true)
 			}
 		})
 	}
 
-	d.shell.OnWindowEvent(events.Common.WindowDidResize, func(*application.WindowEvent) { d.layout() })
+	d.shell.OnWindowEvent(events.Common.WindowDidResize, func(*application.WindowEvent) {
+		d.layout()
+		// The title bar shows a restore icon and drops its resize edges
+		// while maximised.
+		maximized := d.shell.IsMaximised()
+		d.mu.Lock()
+		changed := maximized != d.maximized
+		d.maximized = maximized
+		d.mu.Unlock()
+		if changed {
+			d.pushState(d.shell)
+		}
+	})
 	d.shell.OnWindowEvent(events.Common.WindowMinimise, func(*application.WindowEvent) {
 		if d.setting(func(s settings.Settings) bool { return s.MinimizeToTray }) {
 			d.shell.Hide()
@@ -233,8 +262,12 @@ func (d *desktop) layout() {
 		return
 	}
 	parent := uintptr(d.shell.NativeWindow())
-	winhost.FillBelow(uintptr(d.player.NativeWindow()), parent, titleBarDIP)
-	winhost.FillBelow(uintptr(d.prefs.NativeWindow()), parent, titleBarDIP)
+	border := resizeBorderDIP
+	if d.shell.IsMaximised() || d.shell.IsFullscreen() {
+		border = 0
+	}
+	winhost.FillBelow(uintptr(d.player.NativeWindow()), parent, titleBarDIP, border)
+	winhost.FillBelow(uintptr(d.prefs.NativeWindow()), parent, titleBarDIP, border)
 }
 
 func (d *desktop) createTray() {
@@ -308,12 +341,19 @@ func (d *desktop) update(change func(*settings.Settings)) settings.Settings {
 	return cfg
 }
 
-func (d *desktop) applyPlayerVolume() {
+// applyPlayerVolume sends the saved level to the player page. init is for a
+// fresh page load, where the page may reload once to seed YouTube's PREF
+// cookie; later changes apply immediately and never reload.
+func (d *desktop) applyPlayerVolume(init bool) {
 	d.mu.Lock()
 	level := d.cfg.Volume
 	d.mu.Unlock()
 	pref, _ := volume.EngineToSlider(float64(level))
-	d.player.ExecJS(fmt.Sprintf("window.__ytmDesktop && window.__ytmDesktop.setVolume(%d, %d)", level, pref))
+	method := "setVolume"
+	if init {
+		method = "init"
+	}
+	d.player.ExecJS(fmt.Sprintf("window.__ytmDesktop && window.__ytmDesktop.%s(%d, %d)", method, level, pref))
 }
 
 func (d *desktop) state() map[string]any {
@@ -326,6 +366,7 @@ func (d *desktop) state() map[string]any {
 		"minimizeToTray":   cfg.MinimizeToTray,
 		"closeToTray":      cfg.CloseToTray,
 		"startWithWindows": startup.Enabled(),
+		"maximized":        d.shell.IsMaximised(),
 		"version":          strings.TrimSuffix(version, "-dev"),
 		"discordStatus":    d.presence.Status(),
 		"update":           d.updates.Status(),
@@ -351,6 +392,8 @@ func (d *desktop) pushAllState() {
 type inbound struct {
 	Type     string          `json:"type"`
 	Value    *float64        `json:"value"`
+	URL      string          `json:"url"`
+	Edge     string          `json:"edge"`
 	Settings json.RawMessage `json:"settings"`
 	Playback
 }
@@ -364,7 +407,8 @@ func (d *desktop) onMessage(window application.Window, message string, origin *a
 	}
 	switch window.Name() {
 	case "player":
-		if !strings.HasPrefix(origin.Origin, musicURL) && !strings.HasPrefix(origin.TopOrigin, musicURL) {
+		// Only the YouTube Music page itself, not frames (ads) inside it.
+		if !strings.HasPrefix(origin.Origin, musicURL) {
 			return
 		}
 		d.onPlayerMessage(msg)
@@ -378,7 +422,9 @@ func (d *desktop) onMessage(window application.Window, message string, origin *a
 func (d *desktop) onPlayerMessage(msg inbound) {
 	switch msg.Type {
 	case "ready":
-		d.applyPlayerVolume()
+		d.applyPlayerVolume(true)
+	case "open-external":
+		d.openExternal(msg.URL)
 	case "playback":
 		d.presence.Update(msg.Playback)
 	case "volume-changed":
@@ -388,7 +434,7 @@ func (d *desktop) onPlayerMessage(msg inbound) {
 		d.update(func(s *settings.Settings) { s.SetVolume(*msg.Value) })
 		// Re-applying writes the matching PREF value for the next launch; the
 		// engine already has this level, so nothing audible changes.
-		d.applyPlayerVolume()
+		d.applyPlayerVolume(false)
 		d.pushAllState()
 	}
 }
@@ -400,13 +446,20 @@ func (d *desktop) onShellMessage(msg inbound) {
 	case "volume":
 		if msg.Value != nil {
 			d.update(func(s *settings.Settings) { s.SetVolume(*msg.Value) })
-			d.applyPlayerVolume()
+			d.applyPlayerVolume(false)
 		}
 		d.pushAllState()
 	case "open-settings":
 		d.openSettings("general")
 	case "open-discord":
 		d.openSettings("discord")
+	case "drag":
+		// Wails starts the native move (and hops to the UI thread itself).
+		d.shell.HandleMessage("wails:drag")
+	case "resize":
+		if resizeEdges[msg.Edge] && !d.shell.IsMaximised() {
+			d.shell.HandleMessage("wails:resize:" + msg.Edge)
+		}
 	case "minimize":
 		d.shell.Minimise()
 	case "maximize":
@@ -463,6 +516,18 @@ func (d *desktop) onSettingsMessage(msg inbound) {
 		}
 		d.presence.Configure(cfg.DiscordEnabled, cfg.DiscordAppID)
 		d.pushAllState()
+	}
+}
+
+// openExternal opens a web link from the player in the default browser.
+// Only plain http(s) URLs are accepted.
+func (d *desktop) openExternal(raw string) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil {
+		return
+	}
+	if err := d.app.Browser.OpenURL(u.String()); err != nil {
+		log.Printf("open %s: %v", u, err)
 	}
 }
 

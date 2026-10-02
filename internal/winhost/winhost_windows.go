@@ -64,17 +64,16 @@ func Scale(hwnd uintptr, length int) int {
 	return length * int(dpi) / 96
 }
 
-// FillBelow sizes child to the parent's client area minus a top band of
-// topDIP device-independent pixels.
-func FillBelow(child, parent uintptr, topDIP int) {
+// FillBelow sizes child to the parent's client area below a top band of
+// topDIP, leaving borderDIP uncovered on the left, right and bottom.
+// Lengths are device-independent pixels.
+func FillBelow(child, parent uintptr, topDIP, borderDIP int) {
 	var r rect
 	procGetClientRect.Call(parent, uintptr(unsafe.Pointer(&r)))
-	top := Scale(parent, topDIP)
-	height := int(r.Bottom) - top
-	if height < 0 {
-		height = 0
-	}
-	procSetWindowPos.Call(child, 0, 0, uintptr(top), uintptr(r.Right), uintptr(height), swpNoZOrder|swpNoActivate)
+	top, border := Scale(parent, topDIP), Scale(parent, borderDIP)
+	width := max(0, int(r.Right)-2*border)
+	height := max(0, int(r.Bottom)-top-border)
+	procSetWindowPos.Call(child, 0, uintptr(border), uintptr(top), uintptr(width), uintptr(height), swpNoZOrder|swpNoActivate)
 }
 
 // Raise brings child to the top of its siblings and shows it.

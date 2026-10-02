@@ -16,6 +16,7 @@ Written in Go with [Wails v3](https://v3.wails.io/) on Windows' built-in WebView
 - Optional Discord Rich Presence that publishes only while music is playing
   - compact status: artist
   - card: song title, artist, artwork, and position-aware timer
+- Links that leave YouTube Music (YouTube videos, help pages) open in your default browser; sign-in stays in the app
 - In-app updates from GitHub releases
 
 ## Requirements
@@ -51,7 +52,7 @@ This runs the tests, then writes `dist\YouTube Music.exe`, `dist\YouTube-Music-S
 | `frontend/player.js` | Script injected into music.youtube.com |
 | `frontend/shell.html`, `frontend/settings.html` | Title bar and settings pages |
 
-The title bar is its own window. The YouTube Music and settings webviews are attached below it as Win32 child windows, so the site's own layout is never modified.
+The title bar is its own window. The YouTube Music and settings webviews are attached below it as Win32 child windows, so the site's own layout is never modified. Window moving and edge resizing are handled by the title-bar page itself (Wails' own drag/resize script only loads into pages served by its asset server, and these pages are built from strings): it asks the app to start the native move or resize. While the window is not maximised a 6 px frame of that page stays visible around the YouTube view, which is what makes the window resizable from its sides and bottom.
 
 ## Volume
 
@@ -63,7 +64,7 @@ The app stores the player *engine* level (`#movie_player.getVolume()`, what you 
 go test ./...
 ```
 
-Covers settings migration from every Electron release, the volume curve, the Discord IPC protocol (against a fake Discord), the updater, and invariants of the injected script.
+Covers settings migration from every Electron release, the volume curve, the Discord IPC protocol (against a fake Discord) and update throttling, the updater, and invariants of the injected script (never mutes or forces playback; reloads only once at startup).
 
 For a live check, start the app with a loopback debugging port, play something, and run the end-to-end script (requires Node.js):
 
