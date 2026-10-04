@@ -136,3 +136,51 @@ func TestSaveIsAtomic(t *testing.T) {
 		t.Fatalf("round trip: %+v", got)
 	}
 }
+
+func TestFeatureSettingsRoundTrip(t *testing.T) {
+	path := write(t, `{"volume":3,"volumeScale":"engine","windowBehaviorVersion":1}`)
+	s, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Window != nil || s.MiniPlayer != nil || !s.LastFM.empty() || !s.Spotify.empty() {
+		t.Fatalf("new fields must start empty: %+v", s)
+	}
+	s.Window = &WindowState{X: -1200, Y: 40, Width: 1100, Height: 700, Maximized: true}
+	s.MiniPlayer = &MiniPlayer{X: 10, Y: 20, Open: true}
+	s.LastFM = LastFM{APIKey: "k", Secret: "dpapi:x", SessionKey: "dpapi:y", Username: "me", Enabled: true}
+	s.Spotify = Spotify{ClientID: "id", ClientSecret: "dpapi:z"}
+	s.DiscordBot = DiscordBot{Token: "dpapi:t"}
+	if err := Save(path, s); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *got.Window != *s.Window || *got.MiniPlayer != *s.MiniPlayer || got.LastFM != s.LastFM || got.Spotify != s.Spotify || got.DiscordBot != s.DiscordBot || got.Volume != 3 {
+		t.Fatalf("round trip lost data: %+v", got)
+	}
+	// Clearing a feature removes its key instead of leaving stale credentials.
+	got.LastFM, got.Spotify = LastFM{}, Spotify{}
+	if err := Save(path, got); err != nil {
+		t.Fatal(err)
+	}
+	m := readMap(t, path)
+	if _, ok := m["lastfm"]; ok {
+		t.Fatal("cleared lastfm must be removed")
+	}
+	if _, ok := m["spotify"]; ok {
+		t.Fatal("cleared spotify must be removed")
+	}
+}
+
+func TestInvalidWindowStateIsIgnored(t *testing.T) {
+	s, err := Load(write(t, `{"volume":3,"volumeScale":"engine","windowBehaviorVersion":1,"window":{"x":5,"y":5,"width":0,"height":0}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Window != nil {
+		t.Fatalf("a zero-size window must be ignored: %+v", s.Window)
+	}
+}

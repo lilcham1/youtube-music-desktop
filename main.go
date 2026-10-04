@@ -4,16 +4,16 @@
 // Window layout mirrors the Electron releases: a frameless window renders
 // the 40 px title bar (shell.html); the YouTube Music webview and the
 // settings webview are separate Wails windows re-parented as Win32 children
-// below the bar, so the site's own layout is never modified.
+// below the bar, so the site's own layout is never modified. The mini player
+// is a separate always-on-top window.
 package main
 
 import (
 	"context"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/url"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,10 +26,11 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"golang.org/x/sys/windows"
 
+	"youtube-music/internal/listen"
 	"youtube-music/internal/settings"
 	"youtube-music/internal/startup"
+	"youtube-music/internal/taskbar"
 	"youtube-music/internal/updater"
-	"youtube-music/internal/volume"
 	"youtube-music/internal/winhost"
 )
 
@@ -44,14 +45,13 @@ const (
 	appID       = "com.youtube.music.personal.desktop"
 	titleBarDIP = 40
 	// Width of the frame left around the YouTube view while the window is not
-	// maximised. Wails detects resize edges in the title-bar page, so the
-	// page has to be exposed at the edges for frameless resizing to work.
+	// maximised: the title-bar page detects resize edges there.
 	resizeBorderDIP = 6
 	updateDelay     = 12 * time.Second
 	updatePeriod    = 4 * time.Hour
 )
 
-//go:embed frontend/shell.html frontend/settings.html frontend/player.js assets/icon.ico
+//go:embed frontend/shell.html frontend/settings.html frontend/mini.html frontend/player.js assets/icon.ico
 var files embed.FS
 
 func mustRead(name string) string {
@@ -63,18 +63,32 @@ func mustRead(name string) string {
 }
 
 type desktop struct {
-	app                  *application.App
-	shell, player, prefs *application.WebviewWindow
-	presence             *presence
-	updates              *updater.Updater
-	playerJS             string
-	settingsPath, exe    string
+	app                        *application.App
+	shell, player, prefs, mini *application.WebviewWindow
+	tray                       *trayControls
+	thumbs                     taskbar.ThumbBar // UI thread only
+	presence                   *presence
+	updates                    *updater.Updater
+	scrobbler                  *scrobbler
+	queue                      *spotifyQueue
+	listen                     *listenAlong
+	follow                     *follower
+	playerJS                   string
+	profile, settingsPath, exe string
+	startHidden                bool
+	windowSaver, miniSaver     *debouncer
+	saveMu                     sync.Mutex // writes settings.json in the order changes were made
 
-	mu        sync.Mutex
-	cfg       settings.Settings
-	quitting  bool
-	attached  bool
-	maximized bool
+	mu          sync.Mutex
+	cfg         settings.Settings
+	quitting    bool
+	attached    bool
+	maximized   bool
+	playerReady bool
+	now         Playback  // latest playback report
+	nowAt       time.Time // when it arrived
+	pendingJoin string    // listen-along code received before the player was ready
+	ytVersion   string    // YouTube Music's web client version, for song search
 }
 
 // resizeEdges are the edge names Wails' "wails:resize:<edge>" accepts.
@@ -92,11 +106,19 @@ func main() {
 	if err := os.MkdirAll(profile, 0o755); err != nil {
 		fatal("YouTube Music could not create its profile folder.", err)
 	}
-	d := &desktop{settingsPath: filepath.Join(profile, "settings.json"), playerJS: mustRead("frontend/player.js")}
+	logger := setupLogging(profile)
+	d := &desktop{
+		profile:      profile,
+		settingsPath: filepath.Join(profile, "settings.json"),
+		playerJS:     mustRead("frontend/player.js"),
+		startHidden:  slices.Contains(os.Args[1:], startup.HiddenFlag),
+	}
 	d.exe, _ = os.Executable()
 	if d.cfg, err = settings.Load(d.settingsPath); err != nil {
+		log.Printf("loading settings: %v", err)
 		fatal(fmt.Sprintf("Your saved profile could not be opened. Please check access to %s.", profile), err)
 	}
+	d.pendingJoin = joinCodeFromArgs(os.Args[1:])
 
 	browserArgs := []string{
 		// Keep playback alive while minimised, hidden in the tray or covered.
@@ -107,23 +129,33 @@ func main() {
 	if port := os.Getenv("YTM_DEBUG_PORT"); port != "" {
 		browserArgs = append(browserArgs, "--remote-debugging-port="+port)
 	}
+	taskbar.ButtonCreatedMessage() // register once, outside the window procedure
 
 	d.app = application.New(application.Options{
 		Name:        "YouTube Music",
 		Description: "YouTube Music for Windows",
 		Icon:        []byte(mustRead("assets/icon.ico")),
+		Logger:      logger,
+		LogLevel:    slog.LevelWarn,
 		Windows: application.WindowsOptions{
 			WebviewUserDataPath:   filepath.Join(profile, "webview2"),
 			AdditionalBrowserArgs: browserArgs,
+			WndProcInterceptor:    d.wndProc,
 		},
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: appID,
-			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
+			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
+				if code := joinCodeFromArgs(data.Args); code != "" {
+					go d.joinFromLink(code)
+				}
 				application.InvokeAsync(d.showMain)
 			},
 		},
 		RawMessageHandler: d.onMessage,
-		OnShutdown:        func() { d.presence.Close() },
+		PanicHandler: func(p *application.PanicDetails) {
+			log.Printf("panic: %v\n%s", p.Error, p.FullStackTrace)
+		},
+		OnShutdown: d.shutdown,
 	})
 
 	d.presence = newPresence(func(string) { d.pushSettingsState() })
@@ -135,25 +167,36 @@ func main() {
 		DownloadTo: filepath.Join(os.TempDir(), "youtube-music-update"),
 		OnStatus:   func(updater.Status) { d.pushSettingsState() },
 	}
+	d.scrobbler = newScrobbler(d)
+	d.queue = &spotifyQueue{d: d}
+	d.listen = &listenAlong{d: d, relay: &listen.Relay{}}
+	d.follow = newFollower(d)
+	d.windowSaver = newDebouncer(700*time.Millisecond, d.saveWindowState)
+	d.miniSaver = newDebouncer(700*time.Millisecond, d.saveMiniState)
 
-	d.createWindows(slices.Contains(os.Args[1:], startup.HiddenFlag))
-	d.createTray()
+	d.createWindows()
+	d.tray = newTrayControls(d)
 	d.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		application.InvokeAsync(d.attachChildren)
 		go d.updateLoop()
+		go d.scrobbler.run()
+		d.follow.startBot()
 	})
 
 	if err := d.app.Run(); err != nil {
+		log.Printf("run: %v", err)
 		fatal("YouTube Music stopped unexpectedly.", err)
 	}
 }
 
-func (d *desktop) createWindows(startHidden bool) {
+func (d *desktop) createWindows() {
 	shellHTML := strings.NewReplacer(
 		"{{VOLUME}}", strconv.Itoa(d.cfg.Volume),
 		"{{DISCORD}}", strconv.FormatBool(d.cfg.DiscordEnabled),
 	).Replace(mustRead("frontend/shell.html"))
 
+	// The shell starts hidden; attachChildren restores its saved bounds and
+	// then shows it, so it never flashes at the default position.
 	d.shell = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "shell",
 		Title:            "YouTube Music",
@@ -162,14 +205,13 @@ func (d *desktop) createWindows(startHidden bool) {
 		MinWidth:         900,
 		MinHeight:        600,
 		Frameless:        true,
-		Hidden:           startHidden,
+		Hidden:           true,
 		BackgroundColour: application.NewRGB(5, 5, 5),
 		HTML:             shellHTML,
 		Windows:          application.WindowsWindow{Theme: application.Dark},
 	})
 	// The child windows must not be resizable: Wails would otherwise give them
-	// a sizing frame and resize them inside the shell instead of resizing the
-	// window.
+	// a sizing frame on every page load.
 	child := application.WindowsWindow{HiddenOnTaskbar: true, DisableFramelessWindowDecorations: true, Theme: application.Dark}
 	d.player = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "player",
@@ -191,11 +233,24 @@ func (d *desktop) createWindows(startHidden bool) {
 		HTML:             mustRead("frontend/settings.html"),
 		Windows:          child,
 	})
+	d.mini = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             "mini",
+		Title:            "YouTube Music Mini Player",
+		Width:            380,
+		Height:           112,
+		Frameless:        true,
+		DisableResize:    true,
+		AlwaysOnTop:      true,
+		Hidden:           true,
+		BackgroundColour: application.NewRGB(18, 18, 18),
+		HTML:             mustRead("frontend/mini.html"),
+		Windows:          application.WindowsWindow{HiddenOnTaskbar: true, Theme: application.Dark},
+	})
 
 	// Wails holds ExecJS until its runtime reports ready from the page. That
-	// never happens on a foreign origin, so mark each page ready ourselves
-	// once it has loaded.
-	for _, w := range []*application.WebviewWindow{d.shell, d.player, d.prefs} {
+	// never happens on a foreign origin or a string-built page, so mark each
+	// page ready ourselves once it has loaded.
+	for _, w := range []*application.WebviewWindow{d.shell, d.player, d.prefs, d.mini} {
 		w := w
 		w.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(*application.WindowEvent) {
 			w.HandleMessage("wails:runtime:ready")
@@ -218,7 +273,10 @@ func (d *desktop) createWindows(startHidden bool) {
 		if changed {
 			d.pushState(d.shell)
 		}
+		d.windowSaver.Trigger()
 	})
+	d.shell.OnWindowEvent(events.Common.WindowDidMove, func(*application.WindowEvent) { d.windowSaver.Trigger() })
+	d.mini.OnWindowEvent(events.Common.WindowDidMove, func(*application.WindowEvent) { d.miniSaver.Trigger() })
 	d.shell.OnWindowEvent(events.Common.WindowMinimise, func(*application.WindowEvent) {
 		if d.setting(func(s settings.Settings) bool { return s.MinimizeToTray }) {
 			d.shell.Hide()
@@ -228,6 +286,7 @@ func (d *desktop) createWindows(startHidden bool) {
 		d.mu.Lock()
 		toTray := !d.quitting && d.cfg.CloseToTray
 		d.mu.Unlock()
+		d.saveWindowState()
 		if toTray {
 			e.Cancel()
 			d.shell.Hide()
@@ -237,7 +296,8 @@ func (d *desktop) createWindows(startHidden bool) {
 	})
 }
 
-// attachChildren re-parents the player and settings windows into the shell.
+// attachChildren re-parents the player and settings windows into the shell,
+// restores the window's last position and shows it.
 func (d *desktop) attachChildren() {
 	parent := uintptr(d.shell.NativeWindow())
 	player, prefs := uintptr(d.player.NativeWindow()), uintptr(d.prefs.NativeWindow())
@@ -251,7 +311,17 @@ func (d *desktop) attachChildren() {
 	d.attached = true
 	d.mu.Unlock()
 	d.player.Show()
+	maximize := d.restoreWindowState()
+	if !d.startHidden {
+		d.shell.Show()
+		if maximize {
+			d.shell.Maximise()
+		}
+	}
 	d.layout()
+	if d.cfg.MiniPlayer != nil && d.cfg.MiniPlayer.Open {
+		d.showMini()
+	}
 }
 
 func (d *desktop) layout() {
@@ -268,22 +338,6 @@ func (d *desktop) layout() {
 	}
 	winhost.FillBelow(uintptr(d.player.NativeWindow()), parent, titleBarDIP, border)
 	winhost.FillBelow(uintptr(d.prefs.NativeWindow()), parent, titleBarDIP, border)
-}
-
-func (d *desktop) createTray() {
-	menu := application.NewMenu()
-	menu.Add("Open YouTube Music").OnClick(func(*application.Context) { d.showMain() })
-	menu.Add("Settings…").OnClick(func(*application.Context) { d.openSettings("general") })
-	menu.Add("Discord Rich Presence…").OnClick(func(*application.Context) { d.openSettings("discord") })
-	menu.AddSeparator()
-	menu.Add("Quit YouTube Music").OnClick(func(*application.Context) { d.quit() })
-
-	tray := d.app.SystemTray.New()
-	tray.SetIcon([]byte(mustRead("assets/icon.ico")))
-	tray.SetTooltip("YouTube Music")
-	tray.SetMenu(menu)
-	tray.OnClick(d.showMain)
-	tray.OnDoubleClick(d.showMain)
 }
 
 func (d *desktop) showMain() {
@@ -323,6 +377,16 @@ func (d *desktop) quit() {
 	d.app.Quit()
 }
 
+func (d *desktop) shutdown() {
+	d.windowSaver.Flush()
+	d.miniSaver.Flush()
+	d.listen.Stop()
+	d.follow.stopIfActive("")
+	d.presence.Close()
+	d.scrobbler.flush()
+	log.Print("shut down")
+}
+
 func (d *desktop) setting(get func(settings.Settings) bool) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -331,6 +395,8 @@ func (d *desktop) setting(get func(settings.Settings) bool) bool {
 
 // update mutates the settings under lock and saves them.
 func (d *desktop) update(change func(*settings.Settings)) settings.Settings {
+	d.saveMu.Lock()
+	defer d.saveMu.Unlock()
 	d.mu.Lock()
 	change(&d.cfg)
 	cfg := d.cfg
@@ -341,194 +407,10 @@ func (d *desktop) update(change func(*settings.Settings)) settings.Settings {
 	return cfg
 }
 
-// applyPlayerVolume sends the saved level to the player page. init is for a
-// fresh page load, where the page may reload once to seed YouTube's PREF
-// cookie; later changes apply immediately and never reload.
-func (d *desktop) applyPlayerVolume(init bool) {
+func (d *desktop) config() settings.Settings {
 	d.mu.Lock()
-	level := d.cfg.Volume
-	d.mu.Unlock()
-	pref, _ := volume.EngineToSlider(float64(level))
-	method := "setVolume"
-	if init {
-		method = "init"
-	}
-	d.player.ExecJS(fmt.Sprintf("window.__ytmDesktop && window.__ytmDesktop.%s(%d, %d)", method, level, pref))
-}
-
-func (d *desktop) state() map[string]any {
-	d.mu.Lock()
-	cfg := d.cfg
-	d.mu.Unlock()
-	return map[string]any{
-		"volume":           cfg.Volume,
-		"discordEnabled":   cfg.DiscordEnabled,
-		"minimizeToTray":   cfg.MinimizeToTray,
-		"closeToTray":      cfg.CloseToTray,
-		"startWithWindows": startup.Enabled(),
-		"maximized":        d.shell.IsMaximised(),
-		"version":          strings.TrimSuffix(version, "-dev"),
-		"discordStatus":    d.presence.Status(),
-		"update":           d.updates.Status(),
-	}
-}
-
-func (d *desktop) pushState(w *application.WebviewWindow) {
-	data, _ := json.Marshal(d.state())
-	w.ExecJS("window.__app && window.__app.state(" + string(data) + ")")
-}
-
-func (d *desktop) pushSettingsState() {
-	if d.prefs != nil {
-		d.pushState(d.prefs)
-	}
-}
-
-func (d *desktop) pushAllState() {
-	d.pushState(d.shell)
-	d.pushSettingsState()
-}
-
-type inbound struct {
-	Type     string          `json:"type"`
-	Value    *float64        `json:"value"`
-	URL      string          `json:"url"`
-	Edge     string          `json:"edge"`
-	Settings json.RawMessage `json:"settings"`
-	Playback
-}
-
-// onMessage handles postMessage calls from the three pages. Each page may
-// only send the message types that belong to it.
-func (d *desktop) onMessage(window application.Window, message string, origin *application.OriginInfo) {
-	var msg inbound
-	if err := json.Unmarshal([]byte(message), &msg); err != nil {
-		return
-	}
-	switch window.Name() {
-	case "player":
-		// Only the YouTube Music page itself, not frames (ads) inside it.
-		if !strings.HasPrefix(origin.Origin, musicURL) {
-			return
-		}
-		d.onPlayerMessage(msg)
-	case "shell":
-		d.onShellMessage(msg)
-	case "settings":
-		d.onSettingsMessage(msg)
-	}
-}
-
-func (d *desktop) onPlayerMessage(msg inbound) {
-	switch msg.Type {
-	case "ready":
-		d.applyPlayerVolume(true)
-	case "open-external":
-		d.openExternal(msg.URL)
-	case "playback":
-		d.presence.Update(msg.Playback)
-	case "volume-changed":
-		if msg.Value == nil {
-			return
-		}
-		d.update(func(s *settings.Settings) { s.SetVolume(*msg.Value) })
-		// Re-applying writes the matching PREF value for the next launch; the
-		// engine already has this level, so nothing audible changes.
-		d.applyPlayerVolume(false)
-		d.pushAllState()
-	}
-}
-
-func (d *desktop) onShellMessage(msg inbound) {
-	switch msg.Type {
-	case "ready":
-		d.pushState(d.shell)
-	case "volume":
-		if msg.Value != nil {
-			d.update(func(s *settings.Settings) { s.SetVolume(*msg.Value) })
-			d.applyPlayerVolume(false)
-		}
-		d.pushAllState()
-	case "open-settings":
-		d.openSettings("general")
-	case "open-discord":
-		d.openSettings("discord")
-	case "drag":
-		// Wails starts the native move (and hops to the UI thread itself).
-		d.shell.HandleMessage("wails:drag")
-	case "resize":
-		if resizeEdges[msg.Edge] && !d.shell.IsMaximised() {
-			d.shell.HandleMessage("wails:resize:" + msg.Edge)
-		}
-	case "minimize":
-		d.shell.Minimise()
-	case "maximize":
-		d.shell.ToggleMaximise()
-	case "close":
-		d.shell.Close()
-	}
-}
-
-func (d *desktop) onSettingsMessage(msg inbound) {
-	switch msg.Type {
-	case "ready":
-		d.pushSettingsState()
-	case "close-settings":
-		d.closeSettings()
-	case "quit":
-		d.quit()
-	case "check-updates":
-		go d.updates.Check(context.Background())
-	case "install-update":
-		if d.updates.Status().State == updater.Downloaded {
-			if err := d.updates.Install(); err == nil {
-				d.quit()
-			}
-		}
-	case "save":
-		var next struct {
-			DiscordEnabled   *bool `json:"discordEnabled"`
-			MinimizeToTray   *bool `json:"minimizeToTray"`
-			CloseToTray      *bool `json:"closeToTray"`
-			StartWithWindows *bool `json:"startWithWindows"`
-		}
-		if json.Unmarshal(msg.Settings, &next) != nil {
-			return
-		}
-		cfg := d.update(func(s *settings.Settings) {
-			if next.DiscordEnabled != nil {
-				s.DiscordEnabled = *next.DiscordEnabled
-			}
-			if next.MinimizeToTray != nil {
-				s.MinimizeToTray = *next.MinimizeToTray
-			}
-			if next.CloseToTray != nil {
-				s.CloseToTray = *next.CloseToTray
-			}
-			if next.StartWithWindows != nil {
-				s.StartWithWindows = *next.StartWithWindows
-			}
-		})
-		if next.StartWithWindows != nil {
-			if err := startup.Set(d.exe, *next.StartWithWindows); err != nil {
-				log.Printf("start with windows: %v", err)
-			}
-		}
-		d.presence.Configure(cfg.DiscordEnabled, cfg.DiscordAppID)
-		d.pushAllState()
-	}
-}
-
-// openExternal opens a web link from the player in the default browser.
-// Only plain http(s) URLs are accepted.
-func (d *desktop) openExternal(raw string) {
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil {
-		return
-	}
-	if err := d.app.Browser.OpenURL(u.String()); err != nil {
-		log.Printf("open %s: %v", u, err)
-	}
+	defer d.mu.Unlock()
+	return d.cfg
 }
 
 func (d *desktop) updateLoop() {
@@ -537,6 +419,17 @@ func (d *desktop) updateLoop() {
 		d.updates.Check(context.Background())
 		time.Sleep(updatePeriod)
 	}
+}
+
+// joinCodeFromArgs finds a ytm-desktop://join/<code> link among launch
+// arguments (the installer registers the scheme).
+func joinCodeFromArgs(args []string) string {
+	for _, a := range args {
+		if strings.HasPrefix(strings.ToLower(a), listen.Scheme+":") {
+			return a
+		}
+	}
+	return ""
 }
 
 func fatal(message string, err error) {

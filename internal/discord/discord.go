@@ -39,6 +39,9 @@ type Client struct {
 type Track struct {
 	Title, Artist, Album, Artwork string
 	StartMs, EndMs                int64
+	// JoinURL, when set, adds a "Listen along" button to the status. Discord
+	// shows activity buttons to other people only, never to yourself.
+	JoinURL string
 }
 
 // Connect tries discord-ipc-0..9 and performs the handshake.
@@ -79,14 +82,25 @@ func (c *Client) handshake() error {
 func (c *Client) AppID() string { return c.appID }
 
 // SetActivity shows the track as a "Listening to" activity. If Discord
-// rejects the artwork, it retries without assets so the status still shows.
+// rejects it, it retries without the artwork and then without the button,
+// so the status still shows.
 func (c *Client) SetActivity(t Track) error {
 	activity := BuildActivity(t)
-	if err := c.request("SET_ACTIVITY", map[string]any{"pid": os.Getpid(), "activity": activity}); err != nil {
-		delete(activity, "assets")
+	send := func() error {
 		return c.request("SET_ACTIVITY", map[string]any{"pid": os.Getpid(), "activity": activity})
 	}
-	return nil
+	err := send()
+	// Step down rather than lose the status: first without the artwork
+	// (Discord-side asset problems), then without the listen-along button.
+	if err != nil {
+		delete(activity, "assets")
+		err = send()
+	}
+	if _, hasButtons := activity["buttons"]; err != nil && hasButtons {
+		delete(activity, "buttons")
+		err = send()
+	}
+	return err
 }
 
 // ClearActivity removes the status.
@@ -127,6 +141,9 @@ func BuildActivity(t Track) map[string]any {
 		"state":               artist,
 		"assets":              assets,
 		"instance":            false,
+	}
+	if t.JoinURL != "" {
+		activity["buttons"] = []map[string]string{{"label": "Listen along", "url": t.JoinURL}}
 	}
 	if t.StartMs > 0 {
 		ts := map[string]any{"start": t.StartMs}

@@ -5,6 +5,7 @@
 Unicode true
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "LogicLib.nsh"
 
 !ifndef VERSION
   !define VERSION "0.0.0"
@@ -40,6 +41,27 @@ VIAddVersionKey "LegalCopyright" "Personal desktop wrapper for music.youtube.com
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
+!define WEBVIEW2_KEY "Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+
+; The app runs on the Microsoft Edge WebView2 Runtime, which Windows 11
+; includes. Offer Microsoft's download page if it is missing (interactive
+; installs only; silent updates never prompt).
+Function .onInit
+  ; Machine-wide installs record their version in the 32-bit registry view
+  ; (this installer's default view); per-user installs under HKCU.
+  ReadRegStr $0 HKLM "SOFTWARE\${WEBVIEW2_KEY}" "pv"
+  ${If} $0 == ""
+    ReadRegStr $0 HKCU "Software\${WEBVIEW2_KEY}" "pv"
+  ${EndIf}
+  ${If} $0 == ""
+  ${OrIf} $0 == "0.0.0.0"
+    IfSilent done
+    MessageBox MB_YESNO|MB_ICONEXCLAMATION "YouTube Music needs the Microsoft Edge WebView2 Runtime, which isn't installed on this PC.$\n$\nOpen Microsoft's download page now? You can finish installing YouTube Music either way; it will start once the runtime is installed." IDNO done
+    ExecShell "open" "https://developer.microsoft.com/microsoft-edge/webview2/#download"
+  ${EndIf}
+  done:
+FunctionEnd
+
 ; Ask a running copy to exit, then make sure it is gone so files can be replaced.
 !macro StopApp
   nsExec::Exec 'taskkill /IM "${EXE}"'
@@ -74,6 +96,12 @@ Section "Install"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '"$INSTDIR\${UNINSTALLER}" /S'
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
+
+  ; ytm-desktop:// links (listen-along invites) open the app.
+  WriteRegStr HKCU "Software\Classes\ytm-desktop" "" "URL:YouTube Music Desktop"
+  WriteRegStr HKCU "Software\Classes\ytm-desktop" "URL Protocol" ""
+  WriteRegStr HKCU "Software\Classes\ytm-desktop\DefaultIcon" "" '"$INSTDIR\${EXE}",0'
+  WriteRegStr HKCU "Software\Classes\ytm-desktop\shell\open\command" "" '"$INSTDIR\${EXE}" "%1"'
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "EstimatedSize" $0
 
@@ -94,5 +122,6 @@ Section "Uninstall"
   Delete "$DESKTOP\${APP}.lnk"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP}"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
+  DeleteRegKey HKCU "Software\Classes\ytm-desktop"
   ; Settings and the sign-in profile in %USERPROFILE%\.youtube-music are kept.
 SectionEnd

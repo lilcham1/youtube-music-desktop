@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>YouTube Music Mini Player</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body { margin: 0; overflow: hidden; background: #121212; color: #f1f1f1; font-family: "Segoe UI", Arial, sans-serif; user-select: none; }
+      .card { position: relative; height: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px 14px; border: 1px solid #2a2a2a; }
+      .art { flex: none; width: 84px; height: 84px; border-radius: 8px; background: #262626 center / cover no-repeat; }
+      .art.empty { display: grid; place-items: center; color: #555; font-size: 30px; }
+      .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+      .title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .artist { font-size: 12px; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .controls { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+      button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; color: #e8e8e8; background: transparent; cursor: pointer; }
+      button:hover { background: #2a2a2a; color: #fff; }
+      button.main { width: 38px; height: 38px; background: #f1f1f1; color: #111; }
+      button.main:hover { background: #fff; }
+      svg { width: 18px; height: 18px; fill: currentColor; }
+      .corner { position: absolute; top: 6px; right: 6px; display: flex; gap: 2px; }
+      .corner button { width: 24px; height: 24px; color: #8a8a8a; }
+      .corner svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+      .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: #2a2a2a; }
+      .progress div { height: 100%; width: 0; background: #ff2c3b; }
+    </style>
+  </head>
+  <body>
+    <div class="card" id="card">
+      <div class="art empty" id="art">♪</div>
+      <div class="info">
+        <div class="title" id="title">Nothing playing</div>
+        <div class="artist" id="artist">Start a song in YouTube Music</div>
+        <div class="controls">
+          <button id="previous" title="Previous" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
+          <button id="play" class="main" title="Play" aria-label="Play"><svg viewBox="0 0 24 24" id="play-icon"><path d="M8 5v14l11-7z"/></svg></button>
+          <button id="next" title="Next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
+        </div>
+      </div>
+      <div class="corner">
+        <button id="open" title="Open YouTube Music" aria-label="Open YouTube Music"><svg viewBox="0 0 12 12"><path d="M4.5 2.5h-2v7h7v-2M6.5 2.5h3v3M9.5 2.5 5.5 6.5"/></svg></button>
+        <button id="close" title="Close mini player" aria-label="Close mini player"><svg viewBox="0 0 12 12"><path d="m3 3 6 6m0-6-6 6"/></svg></button>
+      </div>
+      <div class="progress"><div id="bar"></div></div>
+    </div>
+    <script>
+      const send = (type, extra) => window.chrome.webview.postMessage(JSON.stringify({ type, ...extra }));
+      const $ = (id) => document.getElementById(id);
+      const PLAY = '<path d="M8 5v14l11-7z"/>';
+      const PAUSE = '<path d="M7 5h4v14H7zm6 0h4v14h-4z"/>';
+      let track = { playing: false, position: 0, duration: 0, at: 0 };
+
+      window.__app = {
+        nowPlaying(s) {
+          $('title').textContent = s.title || 'Nothing playing';
+          $('artist').textContent = s.title ? (s.artist || '') : 'Start a song in YouTube Music';
+          const art = $('art');
+          if (s.artwork) {
+            art.classList.remove('empty');
+            art.textContent = '';
+            art.style.backgroundImage = 'url("' + String(s.artwork).replace(/["\\]/g, '') + '")';
+          } else {
+            art.classList.add('empty');
+            art.textContent = '♪';
+            art.style.backgroundImage = '';
+          }
+          $('play-icon').innerHTML = s.playing ? PAUSE : PLAY;
+          $('play').title = s.playing ? 'Pause' : 'Play';
+          track = { playing: s.playing, position: s.position || 0, duration: s.duration || 0, at: performance.now() - (s.ageMs || 0) };
+          tick();
+        },
+      };
+
+      // The position is reported on events only; tick it locally.
+      const tick = () => {
+        const elapsed = track.playing ? (performance.now() - track.at) / 1000 : 0;
+        const pos = Math.min(track.duration, track.position + elapsed);
+        $('bar').style.width = track.duration > 0 ? (100 * pos / track.duration) + '%' : '0';
+      };
+      setInterval(tick, 500);
+
+      $('previous').addEventListener('click', () => send('command', { name: 'previous' }));
+      $('play').addEventListener('click', () => send('command', { name: 'playPause' }));
+      $('next').addEventListener('click', () => send('command', { name: 'next' }));
+      $('open').addEventListener('click', () => send('open-main'));
+      $('close').addEventListener('click', () => send('close'));
+
+      // Drag the window from anywhere except the buttons.
+      let pressed = null;
+      document.addEventListener('mousedown', (e) => {
+        if (e.button === 0 && !e.target.closest('button')) pressed = { x: e.screenX, y: e.screenY };
+      }, true);
+      document.addEventListener('mousemove', (e) => {
+        if (pressed && (e.buttons & 1) && (Math.abs(e.screenX - pressed.x) > 3 || Math.abs(e.screenY - pressed.y) > 3)) {
+          pressed = null;
+          send('drag');
+        }
+      }, true);
+      document.addEventListener('mouseup', () => { pressed = null; }, true);
+      send('ready');
+    </script>
+  </body>
+</html>

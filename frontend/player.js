@@ -1,5 +1,8 @@
-// Injected into music.youtube.com after every page load. It never mutes,
-// pauses or plays media and never writes the <video> element's volume.
+// Injected into music.youtube.com after every page load. On its own it never
+// mutes, pauses or plays media and never writes the <video> element's volume.
+// Playback only changes through the explicit commands at the end of this
+// file, which the app sends when you press a control (tray, taskbar, mini
+// player) or use listen along or a Spotify queue.
 //
 // Volume model: the app stores the player *engine* level (what you hear) and
 // applies it with #movie_player.setVolume, which exists in both of YouTube
@@ -38,6 +41,7 @@
     const metadata = navigator.mediaSession?.metadata;
     const video = document.querySelector('video') || findInTree('video');
     return {
+      videoId: document.querySelector('#movie_player')?.getVideoData?.()?.video_id || '',
       playing: Boolean(video && !video.paused && !video.ended && video.readyState > 2),
       title: metadata?.title || pageText('#song-title', '.title.ytmusic-player-bar')
         || document.title.replace(/\s*[-–|]\s*YouTube Music.*$/i, '').trim(),
@@ -135,6 +139,8 @@
       });
       // A newly loaded track keeps the saved level.
       video.addEventListener('loadedmetadata', applyWantedVolume);
+      // Listen along: finish following once the host's song has loaded.
+      ['loadedmetadata', 'playing'].forEach((event) => video.addEventListener(event, () => settleFollow(event)));
       video.addEventListener('volumechange', () => setTimeout(onVolumeChange, 0));
     });
   };
@@ -182,7 +188,75 @@
     if (prefVolume() !== prefLevel) writePrefVolume(prefLevel);
   };
 
+  // <commands>
+  // Playback commands. These are the only places that play, pause, skip or
+  // seek, and they run only when the app calls window.__ytmDesktop.command,
+  // which it does only in response to the user.
+  const app = () => document.querySelector('ytmusic-app');
+  const currentId = () => player()?.getVideoData?.()?.video_id || '';
+  const isPlaying = () => player()?.getPlayerState?.() === 1;
+  // Pausing is always sent: while a song is still loading the player is not
+  // "playing" yet, but it will start on its own unless told to pause.
+  const setPlaying = (wanted) => {
+    const mp = player();
+    if (!mp) return;
+    if (!wanted) mp.pauseVideo();
+    else if (!isPlaying()) mp.playVideo();
+  };
+  // Starts a song (optionally inside a playlist) through YouTube Music's own
+  // navigation, so the page is not reloaded and no "Leave site?" prompt
+  // appears while something is playing.
+  const watch = ({ videoId, playlistId, startSeconds }) => {
+    const endpoint = { videoId };
+    if (playlistId) endpoint.playlistId = playlistId;
+    if (startSeconds > 0) endpoint.startTimeSeconds = Math.floor(startSeconds);
+    app()?.resolveCommand?.({ watchEndpoint: endpoint });
+  };
+  // Listen along: match the host's song, position and play state. When the
+  // song has to change, the play state is applied once the new song loads.
+  let pendingFollow = null;
+  const follow = ({ videoId, positionSeconds = 0, playing }) => {
+    if (!videoId) return;
+    if (currentId() !== videoId) {
+      pendingFollow = { videoId, playing, positionSeconds, at: Date.now() };
+      watch({ videoId, startSeconds: positionSeconds });
+      return;
+    }
+    pendingFollow = null;
+    const mp = player();
+    if (Math.abs((mp?.getCurrentTime?.() ?? 0) - positionSeconds) > 2.5) mp?.seekTo?.(positionSeconds, true);
+    setPlaying(playing);
+  };
+  // Runs on the new song's loadedmetadata and playing events. YouTube may
+  // start a freshly loaded song after metadata arrives, so the host's state
+  // is applied again when it actually starts; the follow then completes. It
+  // expires after a few seconds so it can never undo a later press of play.
+  const followSettleWindow = 6000;
+  const settleFollow = (event) => {
+    if (!pendingFollow || currentId() !== pendingFollow.videoId) return;
+    const { playing, positionSeconds, at } = pendingFollow;
+    if (Date.now() - at > followSettleWindow || event === 'playing') pendingFollow = null;
+    if (Date.now() - at > followSettleWindow) return;
+    const target = positionSeconds + (playing ? (Date.now() - at) / 1000 : 0);
+    if (Math.abs((player()?.getCurrentTime?.() ?? 0) - target) > 2.5) player()?.seekTo?.(target, true);
+    setPlaying(playing);
+  };
+  const commands = {
+    playPause: () => setPlaying(!isPlaying()),
+    play: () => setPlaying(true),
+    pause: () => setPlaying(false),
+    next: () => player()?.nextVideo?.(),
+    previous: () => player()?.previousVideo?.(),
+    seek: (seconds) => player()?.seekTo?.(Number(seconds) || 0, true),
+    watch,
+    follow,
+  };
+  // </commands>
+
   window.__ytmDesktop = {
+    command(name, arg) {
+      if (Object.hasOwn(commands, name)) commands[name](arg);
+    },
     // level: engine level 0–100. prefLevel: the same loudness on the PREF
     // cookie's slider curve (never 1–4, which YouTube treats as silence).
     //
@@ -211,5 +285,6 @@
   new MutationObserver(scheduleInstall).observe(document.documentElement, { childList: true, subtree: true });
   attachVideoEvents();
   schedulePlaybackReport();
-  send('ready');
+  // The client version lets the app use YouTube Music's song search.
+  send('ready', { clientVersion: window.ytcfg?.get?.('INNERTUBE_CLIENT_VERSION') || '' });
 })();

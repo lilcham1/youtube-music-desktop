@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Listen along · YouTube Music Desktop</title>
+    <style>
+      :root { color-scheme: dark; font-family: "Segoe UI", Inter, Arial, sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0f0f0f; color: #f1f1f1; }
+      main { width: min(520px, calc(100vw - 32px)); padding: 32px; border: 1px solid #2a2a2a; border-radius: 16px; background: #181818; }
+      h1 { margin: 0 0 8px; font-size: 22px; }
+      p { margin: 8px 0; color: #b5b5b5; line-height: 1.5; font-size: 14px; }
+      .open { display: inline-block; margin: 16px 0 8px; padding: 12px 18px; border-radius: 10px; background: #ff4f4f; color: #260808; font-weight: 700; text-decoration: none; }
+      code { display: block; margin-top: 8px; padding: 10px; border: 1px dashed #444; border-radius: 8px; word-break: break-all; font: 600 13px ui-monospace, Consolas, monospace; color: #ddd; user-select: all; }
+      button { margin-top: 8px; padding: 8px 12px; border: 0; border-radius: 8px; background: #2b2b2b; color: #eee; font-weight: 600; cursor: pointer; }
+      a { color: #8eb4ff; }
+      .error { color: #ff9b9b; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Listen along</h1>
+      <div id="valid" class="hidden">
+        <p>A friend invited you to listen along in YouTube Music Desktop. You'll hear what they play, in sync.</p>
+        <a id="open" class="open" href="#">Open in YouTube Music</a>
+        <p>Nothing happened? Copy this code and paste it in <strong>Settings → Listen along → Join</strong>:</p>
+        <code id="code"></code>
+        <button id="copy">Copy code</button>
+        <p>Don't have the app yet? <a href="https://github.com/lilcham1/youtube-music-desktop/releases/latest">Download YouTube Music Desktop for Windows</a>, then open this page again.</p>
+      </div>
+      <p id="invalid" class="error hidden">This invite link is incomplete. Ask your friend to copy it again from Settings → Listen along.</p>
+      <p style="margin-top:20px;font-size:12px;color:#777">The invite code stays in your browser: it is part of the link after “#”, which browsers never send to this website.</p>
+    </main>
+    <script>
+      const code = decodeURIComponent(location.hash.slice(1)).trim();
+      if (/^ytm1-[A-Za-z0-9_-]{55}$/.test(code)) {
+        document.getElementById('valid').classList.remove('hidden');
+        document.getElementById('code').textContent = code;
+        const link = 'ytm-desktop://join/' + code;
+        document.getElementById('open').href = link;
+        document.getElementById('copy').addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText(code); document.getElementById('copy').textContent = 'Copied'; } catch {}
+        });
+        location.href = link;
+      } else {
+        document.getElementById('invalid').classList.remove('hidden');
+      }
+    </script>
+  </body>
+</html>

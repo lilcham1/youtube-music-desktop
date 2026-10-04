@@ -2,6 +2,8 @@ package updater
 
 import (
 	"context"
+	"crypto/sha512"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -44,18 +46,43 @@ func TestPickInstallerSkipsBlockmapsAndYml(t *testing.T) {
 	}
 }
 
-func TestCheckDownloadsNewerRelease(t *testing.T) {
-	payload := strings.Repeat("x", 1000)
+// releaseServer serves a release feed, its installer and latest.yml. served
+// is the installer body actually returned; published is what latest.yml
+// claims (they differ to simulate tampering).
+func releaseServer(t *testing.T, served, published string, withYML bool) *httptest.Server {
+	t.Helper()
+	sum := sha512.Sum512([]byte(published))
+	sha := base64.StdEncoding.EncodeToString(sum[:])
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/feed" {
-			fmt.Fprintf(w, `{"tag_name":"v0.3.0","assets":[{"name":"YouTube-Music-Setup-0.3.0.exe","browser_download_url":"%s/dl","size":%d}]}`, srv.URL, len(payload))
-			return
+		switch r.URL.Path {
+		case "/feed":
+			yml := ""
+			if withYML {
+				yml = fmt.Sprintf(`,{"name":"latest.yml","browser_download_url":"%s/latest.yml","size":300}`, srv.URL)
+			}
+			fmt.Fprintf(w, `{"tag_name":"v0.3.0","assets":[{"name":"YouTube-Music-Setup-0.3.0.exe","browser_download_url":"%s/dl","size":%d}%s]}`, srv.URL, len(served), yml)
+		case "/latest.yml":
+			fmt.Fprintf(w, `version: 0.3.0
+files:
+  - url: YouTube-Music-Setup-0.3.0.exe
+    sha512: %s
+    size: %d
+path: YouTube-Music-Setup-0.3.0.exe
+sha512: %s
+releaseDate: '2026-10-03T00:00:00.000Z'
+`, sha, len(published), sha)
+		default:
+			w.Write([]byte(served))
 		}
-		w.Write([]byte(payload))
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
+	return srv
+}
 
+func TestCheckDownloadsAndVerifiesNewerRelease(t *testing.T) {
+	payload := strings.Repeat("x", 1000)
+	srv := releaseServer(t, payload, payload, true)
 	var states []State
 	u := &Updater{Feed: srv.URL + "/feed", Current: "0.2.0", Enabled: true, DownloadTo: t.TempDir(),
 		OnStatus: func(s Status) { states = append(states, s.State) }}
@@ -68,6 +95,54 @@ func TestCheckDownloadsNewerRelease(t *testing.T) {
 	}
 	if states[0] != Checking || states[1] != Downloading {
 		t.Fatalf("state sequence %v", states)
+	}
+}
+
+func TestTamperedOrUnverifiableInstallerIsRejected(t *testing.T) {
+	for name, srv := range map[string]*httptest.Server{
+		"checksum mismatch": releaseServer(t, strings.Repeat("evil", 250), strings.Repeat("x", 1000), true),
+		"no latest.yml":     releaseServer(t, strings.Repeat("x", 1000), strings.Repeat("x", 1000), false),
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			u := &Updater{Feed: srv.URL + "/feed", Current: "0.2.0", Enabled: true, DownloadTo: dir}
+			if s := u.Check(context.Background()); s.State != Failed {
+				t.Fatalf("status = %+v", s)
+			}
+			if u.installer != "" {
+				t.Fatal("an unverified installer must not become installable")
+			}
+			if err := u.Install(); err == nil {
+				t.Fatal("Install must refuse without a verified download")
+			}
+			entries, _ := os.ReadDir(dir)
+			if len(entries) != 0 {
+				t.Fatalf("rejected download left files behind: %v", entries)
+			}
+		})
+	}
+}
+
+func TestParseLatestYML(t *testing.T) {
+	// The format build.ps1 writes.
+	yml := `version: 0.2.1
+files:
+  - url: YouTube-Music-Setup-0.2.1.exe
+    sha512: AAA==
+    size: 4003017
+path: YouTube-Music-Setup-0.2.1.exe
+sha512: AAA==
+releaseDate: '2026-10-02T18:16:57.000Z'
+`
+	if got, err := ParseLatestYML([]byte(yml), "YouTube-Music-Setup-0.2.1.exe"); err != nil || got != "AAA==" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if _, err := ParseLatestYML([]byte(yml), "Other.exe"); err == nil {
+		t.Fatal("a checksum for a different file must not be used")
+	}
+	// Top-level path/sha512 only.
+	if got, _ := ParseLatestYML([]byte("path: a.exe\nsha512: 'BBB='\n"), "a.exe"); got != "BBB=" {
+		t.Fatalf("top-level got %q", got)
 	}
 }
 

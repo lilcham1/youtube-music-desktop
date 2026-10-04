@@ -3,7 +3,11 @@
 package updater
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -110,8 +114,15 @@ func (u *Updater) Check(ctx context.Context) Status {
 		u.set(Failed, "Updates are unavailable right now.")
 		return u.Status()
 	}
+	// Every release publishes latest.yml with the installer's SHA-512. An
+	// installer that cannot be verified against it is never run.
+	want, err := u.expectedSHA512(ctx, rel, name)
+	if err != nil {
+		u.set(Failed, "Updates are unavailable right now.")
+		return u.Status()
+	}
 	u.set(Downloading, fmt.Sprintf("Downloading YouTube Music %s…", latest))
-	path, err := u.download(ctx, name, url, size)
+	path, err := u.download(ctx, name, url, size, want)
 	if err != nil {
 		u.set(Failed, "Updates are unavailable right now.")
 		return u.Status()
@@ -161,7 +172,70 @@ func (u *Updater) fetch(ctx context.Context) (release, error) {
 	return rel, json.NewDecoder(resp.Body).Decode(&rel)
 }
 
-func (u *Updater) download(ctx context.Context, name, url string, size int64) (string, error) {
+// expectedSHA512 downloads the release's latest.yml and returns the
+// checksum it lists for the installer.
+func (u *Updater) expectedSHA512(ctx context.Context, rel release, installer string) (string, error) {
+	for _, a := range rel.Assets {
+		if a.Name != "latest.yml" {
+			continue
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
+		if err != nil {
+			return "", err
+		}
+		resp, err := u.client().Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("latest.yml: %s", resp.Status)
+		}
+		data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		if err != nil {
+			return "", err
+		}
+		return ParseLatestYML(data, installer)
+	}
+	return "", errors.New("release has no latest.yml")
+}
+
+// ParseLatestYML returns the base64 SHA-512 that an electron-builder style
+// latest.yml lists for the file named name.
+func ParseLatestYML(data []byte, name string) (string, error) {
+	var current, topPath, topSHA string
+	found := map[string]string{}
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		line := sc.Text()
+		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "- "))
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.Trim(strings.TrimSpace(value), "'\"")
+		indented := strings.HasPrefix(line, " ") || strings.HasPrefix(line, "-")
+		switch {
+		case key == "url" && indented:
+			current = value
+		case key == "sha512" && indented && current != "":
+			found[current] = value
+		case key == "path" && !indented:
+			topPath = value
+		case key == "sha512" && !indented:
+			topSHA = value
+		}
+	}
+	if sha := found[name]; sha != "" {
+		return sha, nil
+	}
+	if topPath == name && topSHA != "" {
+		return topSHA, nil
+	}
+	return "", fmt.Errorf("latest.yml has no checksum for %s", name)
+}
+
+func (u *Updater) download(ctx context.Context, name, url string, size int64, wantSHA512 string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
@@ -190,7 +264,8 @@ func (u *Updater) download(ctx context.Context, name, url string, size int64) (s
 	if total <= 0 {
 		total = size
 	}
-	written, err := io.Copy(tmp, &progress{r: resp.Body, total: total, report: func(pct int) {
+	hash := sha512.New()
+	written, err := io.Copy(io.MultiWriter(tmp, hash), &progress{r: resp.Body, total: total, report: func(pct int) {
 		u.set(Downloading, fmt.Sprintf("Downloading update: %d%%", pct))
 	}})
 	if cerr := tmp.Close(); err == nil {
@@ -198,6 +273,9 @@ func (u *Updater) download(ctx context.Context, name, url string, size int64) (s
 	}
 	if err == nil && size > 0 && written != size {
 		err = fmt.Errorf("download incomplete: %d of %d bytes", written, size)
+	}
+	if err == nil && base64.StdEncoding.EncodeToString(hash.Sum(nil)) != wantSHA512 {
+		err = errors.New("downloaded installer does not match the published checksum")
 	}
 	if err != nil {
 		os.Remove(path + ".part")

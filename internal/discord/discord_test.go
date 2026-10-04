@@ -104,3 +104,38 @@ func TestConnectFailsWhenDiscordIsClosed(t *testing.T) {
 		t.Fatal("expected error when no pipe answers")
 	}
 }
+
+func TestJoinButtonOnlyWhenHosting(t *testing.T) {
+	plain := BuildActivity(Track{Title: "Song", Artist: "A"})
+	if _, ok := plain["buttons"]; ok {
+		t.Fatal("no button without a join link")
+	}
+	hosting := BuildActivity(Track{Title: "Song", Artist: "A", JoinURL: "https://example.test/join/#ytm1-x"})
+	buttons, ok := hosting["buttons"].([]map[string]string)
+	if !ok || len(buttons) != 1 || buttons[0]["label"] != "Listen along" || buttons[0]["url"] != "https://example.test/join/#ytm1-x" {
+		t.Fatalf("buttons = %#v", hosting["buttons"])
+	}
+}
+
+func TestRejectedButtonIsDroppedNotTheStatus(t *testing.T) {
+	f := &fakeDiscord{t: t, got: make(chan map[string]any, 4),
+		rejectOn: func(a map[string]any) bool { _, has := a["buttons"]; return has }}
+	c, err := Connect(f.dialer(0), "123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.SetActivity(Track{Title: "Song", Artist: "A", JoinURL: "https://example.test/join/#x"}); err != nil {
+		t.Fatalf("the status must still be set: %v", err)
+	}
+	var last map[string]any
+	for i := 0; i < 3; i++ {
+		last = (<-f.got)["activity"].(map[string]any)
+	}
+	if _, has := last["buttons"]; has {
+		t.Fatal("the final attempt must drop the button")
+	}
+	if last["details"] != "Song" {
+		t.Fatalf("final activity = %v", last)
+	}
+}

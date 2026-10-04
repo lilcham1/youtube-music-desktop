@@ -6,20 +6,45 @@ import (
 	"testing"
 )
 
-// The injected script must never silence, pause or start playback, and
-// must never write the <video> element's volume behind YouTube's back.
-// Earlier releases went silent mid-song because of exactly such guards.
-func TestPlayerScriptNeverSilencesOrForcesPlayback(t *testing.T) {
+// splitCommands returns player.js without comments, split into the
+// <commands> block (playback actions the user asked for) and the rest.
+func splitCommands(t *testing.T) (commands, rest string) {
+	t.Helper()
 	src := mustRead("frontend/player.js")
-	code := regexp.MustCompile(`(?m)^\s*//.*$`).ReplaceAllString(src, "")
-	for _, forbidden := range []string{
-		".muted", ".mute(", "unMute(", "setAudioMuted",
-		".play(", ".pause(", "playVideo", "pauseVideo",
-		"'stalled'", "'waiting'", "'error'",
-	} {
-		if strings.Contains(code, forbidden) {
+	start, end := strings.Index(src, "// <commands>"), strings.Index(src, "// </commands>")
+	if start < 0 || end < start {
+		t.Fatal("player.js must keep its playback commands inside // <commands> ... // </commands>")
+	}
+	strip := regexp.MustCompile(`(?m)^\s*//.*$`)
+	return strip.ReplaceAllString(src[start:end], ""), strip.ReplaceAllString(src[:start]+src[end:], "")
+}
+
+// The injected script must never silence, pause or start playback on its
+// own, and must never write the <video> element's volume behind YouTube's
+// back. Earlier releases went silent mid-song because of exactly such
+// guards. Playback calls may only appear in the <commands> block, which the
+// app invokes when the user presses a control.
+func TestPlayerScriptNeverSilencesOrForcesPlayback(t *testing.T) {
+	commands, code := splitCommands(t)
+	for _, forbidden := range []string{".muted", ".mute(", "unMute(", "setAudioMuted", "'stalled'", "'waiting'", "'error'"} {
+		if strings.Contains(code+commands, forbidden) {
 			t.Errorf("player.js must not contain %q", forbidden)
 		}
+	}
+	for _, playback := range []string{".play(", ".pause(", "playVideo", "pauseVideo", "nextVideo", "previousVideo", "seekTo", "resolveCommand"} {
+		if strings.Contains(code, playback) {
+			t.Errorf("%q may only appear inside the <commands> block", playback)
+		}
+	}
+	// Outside the block, the only way in is the command() entry point and the
+	// listen-along settle step, which itself only acts on a pending follow.
+	for _, name := range []string{"setPlaying(", "watch(", "follow("} {
+		if strings.Contains(code, name) {
+			t.Errorf("%s is called outside the <commands> block", name)
+		}
+	}
+	if !strings.Contains(commands, "if (!pendingFollow") {
+		t.Error("settleFollow must do nothing unless a follow is pending")
 	}
 	if regexp.MustCompile(`video\w*\.volume\s*=[^=]`).MatchString(code) {
 		t.Error("player.js must not assign a media element's volume")

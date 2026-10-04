@@ -15,6 +15,7 @@ import (
 
 // Playback is the latest track state reported by the player page.
 type Playback struct {
+	VideoID         string  `json:"videoId"`
 	Playing         bool    `json:"playing"`
 	Title           string  `json:"title"`
 	Artist          string  `json:"artist"`
@@ -34,6 +35,7 @@ type presence struct {
 	mu       sync.Mutex
 	enabled  bool
 	appID    string
+	joinURL  string
 	playback Playback
 	status   string
 
@@ -90,6 +92,14 @@ func (p *presence) setStatus(s string) {
 func (p *presence) Configure(enabled bool, appID string) {
 	p.mu.Lock()
 	p.enabled, p.appID = enabled, appID
+	p.mu.Unlock()
+	p.poke()
+}
+
+// SetJoinURL shows a "Listen along" button on the status while hosting.
+func (p *presence) SetJoinURL(url string) {
+	p.mu.Lock()
+	p.joinURL = url
 	p.mu.Unlock()
 	p.poke()
 }
@@ -168,7 +178,7 @@ func (p *presence) stopRetry() {
 
 func (p *presence) sync() {
 	p.mu.Lock()
-	enabled, appID, pb := p.enabled, p.appID, p.playback
+	enabled, appID, pb, joinURL := p.enabled, p.appID, p.playback, p.joinURL
 	p.mu.Unlock()
 
 	if !enabled || appID == "" {
@@ -186,7 +196,7 @@ func (p *presence) sync() {
 		return
 	}
 
-	key := strings.Join([]string{pb.Title, pb.Artist, pb.Album, strconv.FormatInt(pb.startedAtMs/1000, 10)}, "|")
+	key := strings.Join([]string{pb.Title, pb.Artist, pb.Album, strconv.FormatInt(pb.startedAtMs/1000, 10), joinURL}, "|")
 	if key == p.lastKey && p.client != nil && p.client.AppID() == appID {
 		return
 	}
@@ -213,7 +223,7 @@ func (p *presence) sync() {
 		}
 		p.client = client
 	}
-	track := discord.Track{Title: pb.Title, Artist: pb.Artist, Album: pb.Album, Artwork: pb.Artwork, StartMs: pb.startedAtMs}
+	track := discord.Track{Title: pb.Title, Artist: pb.Artist, Album: pb.Album, Artwork: pb.Artwork, StartMs: pb.startedAtMs, JoinURL: joinURL}
 	if pb.DurationSeconds > 0 && pb.startedAtMs > 0 {
 		track.EndMs = pb.startedAtMs + int64(pb.DurationSeconds*1000)
 	}

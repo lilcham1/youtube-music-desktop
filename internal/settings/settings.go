@@ -37,8 +37,63 @@ type Settings struct {
 	WindowBehaviorVersion int
 	VolumeScale           string
 
+	// Window is the main window's last bounds; nil until first saved.
+	Window *WindowState
+	// MiniPlayer is the mini player's last position and visibility.
+	MiniPlayer *MiniPlayer
+	LastFM     LastFM
+	Spotify    Spotify
+	// DiscordBot is the user's own bot, used to follow Spotify listeners.
+	DiscordBot DiscordBot
+
 	extra map[string]json.RawMessage
 }
+
+// WindowState is in the units Wails uses for window position and size.
+type WindowState struct {
+	X         int  `json:"x"`
+	Y         int  `json:"y"`
+	Width     int  `json:"width"`
+	Height    int  `json:"height"`
+	Maximized bool `json:"maximized"`
+}
+
+type MiniPlayer struct {
+	X    int  `json:"x"`
+	Y    int  `json:"y"`
+	Open bool `json:"open"`
+}
+
+// LastFM holds scrobbling credentials. Secret and SessionKey are stored
+// protected with Windows DPAPI (see internal/secret), never in plain text.
+type LastFM struct {
+	APIKey     string `json:"apiKey,omitempty"`
+	Secret     string `json:"secret,omitempty"`
+	SessionKey string `json:"sessionKey,omitempty"`
+	Username   string `json:"username,omitempty"`
+	Enabled    bool   `json:"enabled,omitempty"`
+}
+
+func (l LastFM) empty() bool { return l == LastFM{} }
+
+// Spotify holds the user's own Spotify developer app credentials.
+// ClientSecret is stored protected with Windows DPAPI.
+type Spotify struct {
+	ClientID     string `json:"clientId,omitempty"`
+	ClientSecret string `json:"clientSecret,omitempty"`
+	// FallbackNoted is set once the user has been told that this app is
+	// refused and playlists come from Spotify's public page instead.
+	FallbackNoted bool `json:"fallbackNoted,omitempty"`
+}
+
+func (sp Spotify) empty() bool { return sp == Spotify{} }
+
+// DiscordBot holds the bot token, stored protected with Windows DPAPI.
+type DiscordBot struct {
+	Token string `json:"token,omitempty"`
+}
+
+func (b DiscordBot) empty() bool { return b == DiscordBot{} }
 
 func Defaults() Settings {
 	return Settings{
@@ -60,6 +115,12 @@ type raw struct {
 	WindowBehaviorVersion *int     `json:"windowBehaviorVersion"`
 	VolumeScale           *string  `json:"volumeScale"`
 	SliderVolume          *float64 `json:"sliderVolume"`
+
+	Window     *WindowState `json:"window"`
+	MiniPlayer *MiniPlayer  `json:"miniPlayer"`
+	LastFM     *LastFM      `json:"lastfm"`
+	Spotify    *Spotify     `json:"spotify"`
+	DiscordBot *DiscordBot  `json:"discordBot"`
 }
 
 // Load reads path, applies migrations and rewrites the file if anything
@@ -92,6 +153,19 @@ func Load(path string) (Settings, error) {
 	set(&s.StartWithWindows, r.StartWithWindows)
 	if r.DiscordAppID != nil && *r.DiscordAppID != "" {
 		s.DiscordAppID = *r.DiscordAppID
+	}
+	if r.Window != nil && r.Window.Width > 0 && r.Window.Height > 0 {
+		s.Window = r.Window
+	}
+	s.MiniPlayer = r.MiniPlayer
+	if r.LastFM != nil {
+		s.LastFM = *r.LastFM
+	}
+	if r.Spotify != nil {
+		s.Spotify = *r.Spotify
+	}
+	if r.DiscordBot != nil {
+		s.DiscordBot = *r.DiscordBot
 	}
 
 	changed := false
@@ -155,7 +229,7 @@ func (s *Settings) SetVolume(v float64) bool {
 
 // MarshalJSON writes known keys over any preserved unknown keys.
 func (s Settings) MarshalJSON() ([]byte, error) {
-	out := make(map[string]any, len(s.extra)+9)
+	out := make(map[string]any, len(s.extra)+13)
 	for k, v := range s.extra {
 		out[k] = v
 	}
@@ -169,6 +243,18 @@ func (s Settings) MarshalJSON() ([]byte, error) {
 	out["volume"] = s.Volume
 	out["windowBehaviorVersion"] = s.WindowBehaviorVersion
 	out["volumeScale"] = s.VolumeScale
+	setOrDelete := func(key string, value any, present bool) {
+		if present {
+			out[key] = value
+		} else {
+			delete(out, key)
+		}
+	}
+	setOrDelete("window", s.Window, s.Window != nil)
+	setOrDelete("miniPlayer", s.MiniPlayer, s.MiniPlayer != nil)
+	setOrDelete("lastfm", s.LastFM, !s.LastFM.empty())
+	setOrDelete("spotify", s.Spotify, !s.Spotify.empty())
+	setOrDelete("discordBot", s.DiscordBot, !s.DiscordBot.empty())
 	return json.MarshalIndent(out, "", "  ")
 }
 

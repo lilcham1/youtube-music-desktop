@@ -2,11 +2,11 @@ dist/
 *.syso
 node_modules/
 
-# Leftovers from the retired Tauri version (not part of the app).
-src-tauri/
-src/
-edge-extension/
-index.html
-tsconfig.json
-tsconfig.node.json
-vite.config.ts
+# Leftovers from the retired Tauri version at the repo root (not part of the app).
+/src-tauri/
+/src/
+/edge-extension/
+/index.html
+/tsconfig.json
+/tsconfig.node.json
+/vite.config.ts
