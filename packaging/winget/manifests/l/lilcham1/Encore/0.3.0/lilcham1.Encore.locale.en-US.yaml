@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
 
 PackageIdentifier: lilcham1.Encore
 PackageVersion: 0.3.0
@@ -29,4 +29,4 @@ Tags:
 - youtube-music
 ReleaseNotesUrl: https://github.com/lilcham1/youtube-music-desktop/releases/tag/v0.3.0
 ManifestType: defaultLocale
-ManifestVersion: 1.9.0
+ManifestVersion: 1.12.0
