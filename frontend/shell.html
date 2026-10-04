@@ -2,16 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>YouTube Music</title>
+    <title>Encore</title>
     <style>
       * { box-sizing: border-box; }
       html, body { height: 100%; }
       body { margin: 0; background: #050505; color: #f1f1f1; font-family: "Segoe UI", Arial, sans-serif; overflow: hidden; }
       .bar { height: 40px; display: flex; align-items: center; background: #080808; border-bottom: 1px solid #202020; --wails-draggable: drag; user-select: none; }
       .brand { display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 14px; font-size: 12px; font-weight: 600; }
-      .brand-mark { position: relative; display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; background: #ff2c3b; }
-      .brand-mark::before { content:""; position:absolute; width:11px; height:11px; border:1.6px solid #fff; border-radius:50%; }
-      .brand-mark i { position:relative; z-index:1; width: 0; height: 0; margin-left: 2px; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 5px solid #fff; }
+      .brand-mark { display: block; flex: none; width: 19px; height: 19px; }
       .space { flex: 1; align-self: stretch; }
       /* Resize cursors on the window edges; set by the script below. */
       html[data-edge="n-resize"] *, html[data-edge="s-resize"] * { cursor: ns-resize !important; }
@@ -36,7 +34,7 @@
   </head>
   <body>
     <header class="bar">
-      <div class="brand"><span class="brand-mark"><i></i></span><span>YouTube Music</span></div>
+      <div class="brand"><svg class="brand-mark" viewBox="0 0 256 256" aria-hidden="true"><defs><linearGradient id="encore-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6a3d"/><stop offset="1" stop-color="#e0245e"/></linearGradient></defs><rect x="8" y="8" width="240" height="240" rx="60" fill="url(#encore-g)"/><path d="M170.4 77.4 A66 66 0 1 1 85.6 77.4" fill="none" stroke="#fff" stroke-width="24" stroke-linecap="round"/><path d="M110 56 L66 54 L100 96 Z" fill="#fff" stroke="#fff" stroke-width="6" stroke-linejoin="round"/><circle cx="128" cy="128" r="24" fill="#fff"/></svg><span>Encore</span></div>
       <div class="space"></div>
       <div class="actions">
         <label class="volume" title="Volume 0 to 100">VOL <input id="volume" type="number" min="0" max="100" step="1" value="{{VOLUME}}" aria-label="Volume 0 to 100" /></label>

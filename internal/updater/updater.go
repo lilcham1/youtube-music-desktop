@@ -121,7 +121,7 @@ func (u *Updater) Check(ctx context.Context) Status {
 		u.set(Failed, "Updates are unavailable right now.")
 		return u.Status()
 	}
-	u.set(Downloading, fmt.Sprintf("Downloading YouTube Music %s…", latest))
+	u.set(Downloading, fmt.Sprintf("Downloading Encore %s…", latest))
 	path, err := u.download(ctx, name, url, size, want)
 	if err != nil {
 		u.set(Failed, "Updates are unavailable right now.")
@@ -130,7 +130,7 @@ func (u *Updater) Check(ctx context.Context) Status {
 	u.mu.Lock()
 	u.installer = path
 	u.mu.Unlock()
-	u.set(Downloaded, fmt.Sprintf("YouTube Music %s is ready to install.", latest))
+	u.set(Downloaded, fmt.Sprintf("Encore %s is ready to install.", latest))
 	return u.Status()
 }
 

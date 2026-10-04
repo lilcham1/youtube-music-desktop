@@ -57,6 +57,9 @@ type presence struct {
 // is sent once the interval has passed.
 const minActivityInterval = 2 * time.Second
 
+// downloadPage is where the "Get Encore" button on the status leads.
+const downloadPage = "https://lilcham1.github.io/youtube-music-desktop/"
+
 func newPresence(onStatus func(string)) *presence {
 	p := &presence{
 		dial: func(path string, timeout time.Duration) (net.Conn, error) {
@@ -223,7 +226,7 @@ func (p *presence) sync() {
 		}
 		p.client = client
 	}
-	track := discord.Track{Title: pb.Title, Artist: pb.Artist, Album: pb.Album, Artwork: pb.Artwork, StartMs: pb.startedAtMs, JoinURL: joinURL}
+	track := discord.Track{Title: pb.Title, Artist: pb.Artist, Album: pb.Album, Artwork: pb.Artwork, StartMs: pb.startedAtMs, JoinURL: joinURL, DownloadURL: downloadPage}
 	if pb.DurationSeconds > 0 && pb.startedAtMs > 0 {
 		track.EndMs = pb.startedAtMs + int64(pb.DurationSeconds*1000)
 	}

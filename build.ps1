@@ -1,4 +1,4 @@
-# Builds "dist\YouTube Music.exe" and the NSIS installer.
+# Builds "dist\Encore.exe" and the NSIS installer.
 #   .\build.ps1 -Version 0.2.0
 # Requires Go, go-winres (go install github.com/tc-hib/go-winres@latest)
 # and NSIS (makensis) on PATH.
@@ -17,13 +17,20 @@ if ($LASTEXITCODE) { throw 'go-winres failed' }
 
 New-Item -ItemType Directory -Force dist | Out-Null
 $ldflags = "-H windowsgui -s -w -X main.version=$Version -X main.updatesEnabled=true"
-go build -trimpath -ldflags $ldflags -o "dist\YouTube Music.exe" .
+# The app's own Last.fm API account (optional; users can add their own).
+if ($env:LASTFM_API_KEY -and $env:LASTFM_SHARED_SECRET) {
+  $ldflags += " -X main.lastfmAPIKey=$env:LASTFM_API_KEY -X main.lastfmAppSecret=$env:LASTFM_SHARED_SECRET"
+  Write-Host 'Including the Last.fm API account'
+} else {
+  Write-Host 'No LASTFM_API_KEY/LASTFM_SHARED_SECRET: users add their own Last.fm API account'
+}
+go build -trimpath -ldflags $ldflags -o "dist\Encore.exe" .
 if ($LASTEXITCODE) { throw 'go build failed' }
 
 if (-not $SkipInstaller) {
-  makensis /V2 "/DVERSION=$Version" installer\youtube-music.nsi
+  makensis /V2 "/DVERSION=$Version" installer\encore.nsi
   if ($LASTEXITCODE) { throw 'makensis failed' }
-  $installer = Get-Item "dist\YouTube-Music-Setup-$Version.exe"
+  $installer = Get-Item "dist\Encore-Setup-$Version.exe"
 
   # latest.yml lets Electron 0.1.x installs update themselves to this build.
   $bytes = [IO.File]::ReadAllBytes($installer.FullName)

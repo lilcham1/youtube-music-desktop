@@ -69,6 +69,6 @@ func setupLogging(profile string) *slog.Logger {
 	}
 	log.SetOutput(out)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	log.Printf("YouTube Music %s starting", version)
+	log.Printf("Encore %s starting", version)
 	return slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: slog.LevelWarn}))
 }

@@ -5,8 +5,8 @@
   "RT_MANIFEST": {
     "#1": {
       "0409": {
-        "identity": { "name": "YouTubeMusic.Desktop", "version": "" },
-        "description": "YouTube Music",
+        "identity": { "name": "lilcham1.Encore", "version": "" },
+        "description": "Encore for YouTube Music",
         "minimum-os": "win10",
         "execution-level": "as invoker",
         "dpi-awareness": "per monitor v2",
@@ -21,11 +21,11 @@
         "fixed": { "file_version": "0.0.0.0", "product_version": "0.0.0.0" },
         "info": {
           "0409": {
-            "FileDescription": "YouTube Music",
-            "InternalName": "YouTube Music",
-            "OriginalFilename": "YouTube Music.exe",
-            "ProductName": "YouTube Music",
-            "LegalCopyright": "Personal desktop wrapper for music.youtube.com"
+            "FileDescription": "Encore for YouTube Music",
+            "InternalName": "Encore",
+            "OriginalFilename": "Encore.exe",
+            "ProductName": "Encore for YouTube Music",
+            "LegalCopyright": "Copyright (C) lilcham1. GPL-3.0. Not affiliated with Google or YouTube."
           }
         }
       }

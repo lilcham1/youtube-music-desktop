@@ -107,7 +107,9 @@ func (f *follower) state() map[string]any {
 	bot := f.bot
 	out := map[string]any{"mode": f.mode, "target": f.target, "name": f.name, "status": f.status, "following": f.following}
 	f.mu.Unlock()
-	out["botConfigured"] = f.d.config().DiscordBot.Token != ""
+	cfg := f.d.config()
+	out["botConfigured"] = cfg.DiscordBot.Token != ""
+	out["lastfmKey"] = lastfmReadKey(cfg.LastFM) != ""
 	if bot != nil {
 		st := bot.Status()
 		out["botConnected"] = st.Connected
@@ -215,9 +217,9 @@ func (f *follower) FollowLastfm(user string) {
 		f.setStatus("Enter a Last.fm username.")
 		return
 	}
-	apiKey := f.d.config().LastFM.APIKey
+	apiKey := lastfmReadKey(f.d.config().LastFM)
 	if apiKey == "" {
-		f.setStatus("Add your Last.fm API key in the Last.fm tab first (no sign-in needed to follow someone).")
+		f.setStatus("Add a Last.fm API key in the Last.fm tab first (no sign-in needed to follow someone).")
 		return
 	}
 	client := &lastfm.Client{APIKey: apiKey, APIURL: devOverride("YTM_LASTFM_API")}

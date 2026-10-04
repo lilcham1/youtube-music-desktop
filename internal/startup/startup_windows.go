@@ -9,7 +9,7 @@ import (
 
 const (
 	runKey    = `Software\Microsoft\Windows\CurrentVersion\Run`
-	valueName = "YouTube Music"
+	valueName = "Encore"
 	// HiddenFlag starts the app in the notification area.
 	HiddenFlag = "--hidden"
 )

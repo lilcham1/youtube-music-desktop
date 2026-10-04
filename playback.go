@@ -110,17 +110,17 @@ func newTrayControls(d *desktop) *trayControls {
 	t.nextItem = t.menu.Add("Next").OnClick(func(*application.Context) { go d.command("next", nil) })
 	t.prevItem = t.menu.Add("Previous").OnClick(func(*application.Context) { go d.command("previous", nil) })
 	t.menu.AddSeparator()
-	t.menu.Add("Open YouTube Music").OnClick(func(*application.Context) { d.showMain() })
+	t.menu.Add("Open Encore").OnClick(func(*application.Context) { d.showMain() })
 	t.miniItem = t.menu.AddCheckbox("Mini player", false).OnClick(func(*application.Context) { d.toggleMini() })
 	t.menu.Add("Listen along…").OnClick(func(*application.Context) { d.openSettings("listen") })
 	t.menu.Add("Play a Spotify playlist…").OnClick(func(*application.Context) { d.openSettings("spotify") })
 	t.menu.Add("Settings…").OnClick(func(*application.Context) { d.openSettings("general") })
 	t.menu.AddSeparator()
-	t.menu.Add("Quit YouTube Music").OnClick(func(*application.Context) { d.quit() })
+	t.menu.Add("Quit Encore").OnClick(func(*application.Context) { d.quit() })
 
 	t.tray = d.app.SystemTray.New()
 	t.tray.SetIcon([]byte(mustRead("assets/icon.ico")))
-	t.tray.SetTooltip("YouTube Music")
+	t.tray.SetTooltip("Encore")
 	t.tray.SetMenu(t.menu)
 	t.tray.OnClick(d.showMain)
 	t.tray.OnDoubleClick(d.showMain)
@@ -152,9 +152,9 @@ func nowPlayingText(pb Playback) string {
 func (t *trayControls) update(pb Playback) {
 	text := nowPlayingText(pb)
 	// Windows limits tray tooltips to 127 characters.
-	tooltip := "YouTube Music"
+	tooltip := "Encore"
 	if text != "" {
-		tooltip = trayText("YouTube Music\n"+text, 127)
+		tooltip = trayText("Encore\n"+text, 127)
 	}
 	label := "Nothing playing"
 	if text != "" {

@@ -1,28 +1,40 @@
-# YouTube Music Desktop
+<p align="center"><img src="site/img/encore-icon-256.png" width="96" alt="Encore icon"></p>
 
-A compact, personal Windows desktop player for the official YouTube Music website.
+<h1 align="center">Encore for YouTube Music</h1>
 
-> Unofficial personal project. It is not affiliated with, endorsed by, or sponsored by YouTube, Google, or Discord.
+<p align="center">A free, tiny Windows app for YouTube Music that lets you listen together with friends, even ones on Spotify.</p>
 
-Written in Go with [Wails v3](https://v3.wails.io/) on Windows' built-in WebView2 (Edge) runtime. The installer is about 4 MB and the installed app about 13 MB.
+<p align="center">
+  <a href="https://lilcham1.github.io/youtube-music-desktop/"><b>Download for Windows</b></a> ·
+  <a href="https://github.com/lilcham1/youtube-music-desktop/releases/latest">Latest release</a> ·
+  <a href="https://lilcham1.github.io/youtube-music-desktop/#faq">FAQ</a>
+</p>
 
-## Included
+<p align="center"><img src="site/img/encore-main.png" alt="Encore playing a song, with the queue on the right and the player bar at the bottom"></p>
 
-- One window with a custom dark title bar, no browser tab or helper app; it reopens where you left it (size, position, maximised)
-- Persistent official YouTube Music sign-in inside the app
-- Numeric `0–100` volume control that remembers its level across launches; scroll over it to change it (Shift: steps of 5)
-- Playback controls everywhere: the tray menu (with the current song), the taskbar thumbnail (⏮ ⏯ ⏭), keyboard media keys and the Windows media flyout
-- Mini player: a small always-on-top window with artwork and controls
-- Optional Discord Rich Presence that publishes only while music is playing
-  - compact status: artist
-  - card: song title, artist, artwork, and position-aware timer
-- **Listen along**: friends with this app hear what you play, in sync; join with a code, a link, or the button on your Discord status
-- **Follow someone on Spotify**: play along with a friend listening on Spotify (song, position, pauses and skips through your own Discord bot, or song changes through Last.fm)
-- **Spotify playlists**: paste a playlist link to play it on YouTube Music as your queue
-- **Last.fm scrobbling**
-- Startup and minimize/close-to-tray preferences
-- Links that leave YouTube Music (YouTube videos, help pages) open in your default browser; sign-in stays in the app
-- In-app updates from GitHub releases, verified against the published SHA-512 before installing
+> Independent open-source project, not affiliated with or endorsed by Google, YouTube, Spotify, Discord or Last.fm. YouTube Music is a trademark of Google LLC. Encore shows the official music.youtube.com website; it doesn't download music or block ads.
+
+Written in Go with [Wails v3](https://v3.wails.io/) on Windows' built-in WebView2 (Edge) runtime: the installer is about 4 MB and the installed app about 13 MB, where Chrome-based apps are about 100 MB.
+
+## Features
+
+- **Listen along**: friends with Encore hear what you play, in sync (song, position, pauses, seeks and skips); they join with a code, a link, or the button on your Discord status. End-to-end encrypted.
+- **Follow a friend on Spotify**: play along with someone listening on Spotify, live through your own Discord bot (song, position, pauses and skips) or through Last.fm (song changes).
+- **Spotify playlists**: paste a playlist link to play it on YouTube Music as your queue.
+- **Discord status**: song, artist, artwork and a live timer, with a "Get Encore" button for friends (and "Listen along" while you host).
+- **Last.fm scrobbling**, with an offline queue.
+- **Mini player**: a small always-on-top window with artwork and controls.
+- Playback controls everywhere: the tray menu (with the current song), the taskbar thumbnail (⏮ ⏯ ⏭), keyboard media keys and the Windows media flyout.
+- Numeric `0–100` volume that remembers its level across launches; scroll over it to change it (Shift: steps of 5).
+- One window with a custom dark title bar that reopens where you left it; start with Windows and minimize/close to tray if you want.
+- Your official YouTube Music sign-in, library and Premium, inside the app. Links that leave YouTube Music open in your default browser.
+- In-app updates from GitHub releases, verified against the published SHA-512 before installing.
+
+## Install
+
+Download the installer from the [download page](https://lilcham1.github.io/youtube-music-desktop/) and run it. It installs for your Windows account only (no administrator rights) and replaces earlier "YouTube Music" versions of this app, keeping your settings and sign-in.
+
+The installer isn't code-signed yet (free signing for open-source projects has been requested), so Windows may say "Windows protected your PC": select **More info → Run anyway**. Releases are built by GitHub Actions from this repository; see the [code signing policy and privacy details](https://lilcham1.github.io/youtube-music-desktop/code-signing/).
 
 ## Requirements
 
@@ -44,7 +56,7 @@ Needs [go-winres](https://github.com/tc-hib/go-winres) (`go install github.com/t
 .\build.ps1 -Version 0.2.0
 ```
 
-This runs the tests, then writes `dist\YouTube Music.exe`, `dist\YouTube-Music-Setup-0.2.0.exe` and `dist\latest.yml`. The installer is per-user, installs to `%LOCALAPPDATA%\Programs\YouTube Music` and replaces an Electron 0.1.x install in place. Pushing a `v*` tag builds and publishes a release from GitHub Actions.
+This runs the tests, then writes `dist\Encore.exe`, `dist\Encore-Setup-0.2.0.exe` and `dist\latest.yml`. The installer is per-user, installs to `%LOCALAPPDATA%\Programs\Encore` and replaces an earlier install named "YouTube Music" (Go 0.2.x or Electron 0.1.x), whose settings in `%USERPROFILE%\.youtube-music` carry over. Pushing a `v*` tag builds and publishes a release from GitHub Actions.
 
 ## Where things live
 
@@ -105,7 +117,7 @@ Sync messages go through the public [ntfy.sh](https://ntfy.sh) relay on a random
 **Settings → Listen along → Follow someone on Spotify** plays along with a friend who listens on Spotify, even though they don't use this app. Each song they play is looked up on YouTube Music the same way as for playlists; a song that can't be found pauses until their next one. Following stops if you start hosting, join a listen-along room, or play a Spotify playlist. There are two ways:
 
 - **Through Discord (live: song, position, pauses, seeks and skips).** Spotify shares no live listening data with other apps, but Discord shows it on a friend's status when they've connected Spotify to Discord. A regular Discord account can't read that through an API, so the app uses a Discord bot you create once: in the [Discord developer portal](https://discord.com/developers/applications) create an application, turn on **Presence Intent** and **Server Members Intent** under *Bot*, reset and copy the token into Settings, then use **Copy invite link** to add the bot to a server you share with your friends. Everyone in those servers who is playing Spotify then appears in the list with a **Follow** button. The bot only reads statuses and never sends messages; its token stays on your PC.
-- **Through Last.fm (song changes only).** For a friend who scrobbles Spotify to Last.fm: enter their username (needs only your Last.fm API key, no sign-in). Their now-playing song is checked every 10 seconds; Last.fm doesn't share position or pauses.
+- **Through Last.fm (song changes only).** For a friend who scrobbles Spotify to Last.fm: enter their username (no Last.fm account or sign-in needed). Their now-playing song is checked every 10 seconds; Last.fm doesn't share position or pauses.
 
 ## Spotify playlists
 
@@ -115,8 +127,14 @@ Any public playlist works without setup: the app reads Spotify's public playlist
 
 ## Last.fm
 
-**Settings → Last.fm** scrobbles what you play: a song counts after half its length or four minutes, whichever comes first (songs of 30 seconds or less never count), and Last.fm also shows what you're listening to now. Create a free [API account](https://www.last.fm/api/account/create), paste its API key and shared secret, press **Connect** and approve in the browser. Scrobbles that can't be sent (offline) are queued and sent later.
+**Settings → Last.fm** scrobbles what you play: a song counts after half its length or four minutes, whichever comes first (songs of 30 seconds or less never count), and Last.fm also shows what you're listening to now. Press **Connect** and approve in the browser. Scrobbles that can't be sent (offline) are queued and sent later.
+
+Release builds include the app's own Last.fm API account, set from the `LASTFM_API_KEY` and `LASTFM_SHARED_SECRET` repository secrets at build time (as with other desktop scrobblers, a desktop app has to carry its key and secret; they identify the app, not any user). Anyone can still use their own: create a free [API account](https://www.last.fm/api/account/create) and paste its key and secret under *Use your own Last.fm API account instead*. Builds without the secrets (`go run .`, forks) ask for your own account.
 
 ## Discord Rich Presence
 
 Select the Discord icon in the title bar and enable Rich Presence. No Discord application ID or client secret needs to be entered; the app talks only to the Discord desktop client running on the same PC.
+
+## License
+
+Encore is free software under the [GNU General Public License v3.0](LICENSE): you may use, share and change it, and anything you distribute based on it must be shared under the same license with its source code. Copyright © lilcham1.

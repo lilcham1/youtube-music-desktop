@@ -1,4 +1,4 @@
-// YouTube Music Desktop: a Windows wrapper around music.youtube.com built on
+// Encore for YouTube Music: a Windows wrapper around music.youtube.com built on
 // Wails v3 and the system WebView2 runtime.
 //
 // Window layout mirrors the Electron releases: a frameless window renders
@@ -35,9 +35,13 @@ import (
 )
 
 // Set by release builds: -ldflags "-X main.version=0.2.0 -X main.updatesEnabled=true".
+// The app's own Last.fm API account comes from the LASTFM_API_KEY and
+// LASTFM_SHARED_SECRET build secrets; without it users add their own.
 var (
-	version        = "0.2.0-dev"
-	updatesEnabled = "false"
+	version         = "0.2.0-dev"
+	updatesEnabled  = "false"
+	lastfmAPIKey    = ""
+	lastfmAppSecret = ""
 )
 
 const (
@@ -100,11 +104,11 @@ var resizeEdges = map[string]bool{
 func main() {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		fatal("YouTube Music could not find your user folder.", err)
+		fatal("Encore could not find your user folder.", err)
 	}
 	profile := filepath.Join(home, ".youtube-music")
 	if err := os.MkdirAll(profile, 0o755); err != nil {
-		fatal("YouTube Music could not create its profile folder.", err)
+		fatal("Encore could not create its profile folder.", err)
 	}
 	logger := setupLogging(profile)
 	d := &desktop{
@@ -132,8 +136,8 @@ func main() {
 	taskbar.ButtonCreatedMessage() // register once, outside the window procedure
 
 	d.app = application.New(application.Options{
-		Name:        "YouTube Music",
-		Description: "YouTube Music for Windows",
+		Name:        "Encore",
+		Description: "Encore for YouTube Music",
 		Icon:        []byte(mustRead("assets/icon.ico")),
 		Logger:      logger,
 		LogLevel:    slog.LevelWarn,
@@ -164,7 +168,7 @@ func main() {
 		Feed:       updater.DefaultFeed,
 		Current:    strings.TrimSuffix(version, "-dev"),
 		Enabled:    updatesEnabled == "true",
-		DownloadTo: filepath.Join(os.TempDir(), "youtube-music-update"),
+		DownloadTo: filepath.Join(os.TempDir(), "encore-update"),
 		OnStatus:   func(updater.Status) { d.pushSettingsState() },
 	}
 	d.scrobbler = newScrobbler(d)
@@ -185,7 +189,7 @@ func main() {
 
 	if err := d.app.Run(); err != nil {
 		log.Printf("run: %v", err)
-		fatal("YouTube Music stopped unexpectedly.", err)
+		fatal("Encore stopped unexpectedly.", err)
 	}
 }
 
@@ -199,7 +203,7 @@ func (d *desktop) createWindows() {
 	// then shows it, so it never flashes at the default position.
 	d.shell = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "shell",
-		Title:            "YouTube Music",
+		Title:            "Encore",
 		Width:            1280,
 		Height:           800,
 		MinWidth:         900,
@@ -215,7 +219,7 @@ func (d *desktop) createWindows() {
 	child := application.WindowsWindow{HiddenOnTaskbar: true, DisableFramelessWindowDecorations: true, Theme: application.Dark}
 	d.player = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "player",
-		Title:            "YouTube Music Player",
+		Title:            "Encore Player",
 		Frameless:        true,
 		DisableResize:    true,
 		Hidden:           true,
@@ -225,7 +229,7 @@ func (d *desktop) createWindows() {
 	})
 	d.prefs = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "settings",
-		Title:            "YouTube Music Settings",
+		Title:            "Encore Settings",
 		Frameless:        true,
 		DisableResize:    true,
 		Hidden:           true,
@@ -235,7 +239,7 @@ func (d *desktop) createWindows() {
 	})
 	d.mini = d.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "mini",
-		Title:            "YouTube Music Mini Player",
+		Title:            "Encore Mini Player",
 		Width:            380,
 		Height:           112,
 		Frameless:        true,
@@ -437,7 +441,7 @@ func fatal(message string, err error) {
 	if err != nil {
 		text += "\n\n" + err.Error()
 	}
-	title, _ := windows.UTF16PtrFromString("YouTube Music")
+	title, _ := windows.UTF16PtrFromString("Encore")
 	body, _ := windows.UTF16PtrFromString(text)
 	windows.MessageBox(0, body, title, windows.MB_OK|windows.MB_ICONERROR)
 	os.Exit(1)

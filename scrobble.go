@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -38,22 +39,56 @@ func newScrobbler(d *desktop) *scrobbler {
 	return s
 }
 
+// errNoLastfmApp means neither the user nor the build supplied a Last.fm
+// API account.
+var errNoLastfmApp = errors.New("no Last.fm API account")
+
+// lastfmApp returns the Last.fm API account to use: the user's own when
+// they saved one, otherwise the one built into release builds. A session
+// belongs to the account it was made with, and saving a different key
+// clears it (saveCredentials).
+func lastfmApp(cfg settings.LastFM) (apiKey, sharedSecret string, builtIn bool, err error) {
+	if cfg.APIKey == "" {
+		if lastfmAPIKey == "" || lastfmAppSecret == "" {
+			return "", "", false, errNoLastfmApp
+		}
+		return lastfmAPIKey, lastfmAppSecret, true, nil
+	}
+	if cfg.Secret == "" {
+		return cfg.APIKey, "", false, errNoLastfmApp
+	}
+	sharedSecret, err = secret.Unprotect(cfg.Secret)
+	return cfg.APIKey, sharedSecret, false, err
+}
+
+// lastfmReadKey is the API key for unsigned reads (following someone):
+// the user's own, or the built-in one.
+func lastfmReadKey(cfg settings.LastFM) string {
+	if cfg.APIKey != "" {
+		return cfg.APIKey
+	}
+	return lastfmAPIKey
+}
+
 // configure builds the client from the saved settings.
 func (s *scrobbler) configure() {
 	cfg := s.d.config().LastFM
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.client = nil
-	if cfg.APIKey == "" || cfg.Secret == "" || cfg.SessionKey == "" || !cfg.Enabled {
+	if cfg.SessionKey == "" || !cfg.Enabled {
 		return
 	}
-	sharedSecret, err1 := secret.Unprotect(cfg.Secret)
+	apiKey, sharedSecret, _, err1 := lastfmApp(cfg)
 	sessionKey, err2 := secret.Unprotect(cfg.SessionKey)
+	if errors.Is(err1, errNoLastfmApp) {
+		return
+	}
 	if err1 != nil || err2 != nil {
 		s.status = "Your saved Last.fm sign-in can't be read on this PC. Connect again."
 		return
 	}
-	s.client = &lastfm.Client{APIKey: cfg.APIKey, Secret: sharedSecret, SessionKey: sessionKey}
+	s.client = &lastfm.Client{APIKey: apiKey, Secret: sharedSecret, SessionKey: sessionKey}
 }
 
 // state is what the settings page shows.
@@ -62,9 +97,13 @@ func (s *scrobbler) state() map[string]any {
 	s.mu.Lock()
 	status, connecting := s.status, s.connecting
 	s.mu.Unlock()
+	builtIn := lastfmAPIKey != "" && lastfmAppSecret != ""
+	ready := (cfg.APIKey == "" && builtIn) || (cfg.APIKey != "" && cfg.Secret != "")
 	if status == "" {
 		switch {
-		case cfg.APIKey == "" || cfg.Secret == "":
+		case !ready && cfg.APIKey != "":
+			status = "Add the shared secret for your API key, or clear the key to use the app's own."
+		case !ready:
 			status = "Add your Last.fm API key and shared secret to get started."
 		case cfg.SessionKey == "":
 			status = "Ready to connect your Last.fm account."
@@ -80,6 +119,8 @@ func (s *scrobbler) state() map[string]any {
 	return map[string]any{
 		"apiKey":     cfg.APIKey,
 		"hasSecret":  cfg.Secret != "",
+		"builtIn":    builtIn,
+		"ready":      ready,
 		"connected":  cfg.SessionKey != "",
 		"username":   cfg.Username,
 		"enabled":    cfg.Enabled,
@@ -124,8 +165,8 @@ func (s *scrobbler) saveCredentials(apiKey, sharedSecret string) {
 // this polls for the session.
 func (s *scrobbler) connect() {
 	cfg := s.d.config().LastFM
-	sharedSecret, err := secret.Unprotect(cfg.Secret)
-	if cfg.APIKey == "" || err != nil || sharedSecret == "" {
+	apiKey, sharedSecret, _, err := lastfmApp(cfg)
+	if err != nil || sharedSecret == "" {
 		s.setStatus("Save your Last.fm API key and shared secret first.")
 		return
 	}
@@ -143,7 +184,7 @@ func (s *scrobbler) connect() {
 		s.d.pushSettingsState()
 	}()
 
-	client := &lastfm.Client{APIKey: cfg.APIKey, Secret: sharedSecret}
+	client := &lastfm.Client{APIKey: apiKey, Secret: sharedSecret}
 	ctx, cancel := context.WithTimeout(context.Background(), lastfmApproveFor+30*time.Second)
 	defer cancel()
 	token, approveURL, err := client.Token(ctx)
@@ -152,7 +193,7 @@ func (s *scrobbler) connect() {
 		return
 	}
 	s.d.openExternal(approveURL)
-	s.setStatus("Approve YouTube Music in the Last.fm page that just opened in your browser…")
+	s.setStatus("Approve access in the Last.fm page that just opened in your browser…")
 	deadline := time.Now().Add(lastfmApproveFor)
 	for time.Now().Before(deadline) {
 		select {
@@ -175,7 +216,9 @@ func (s *scrobbler) connect() {
 			return
 		}
 		s.d.update(func(c *settings.Settings) {
-			c.LastFM.SessionKey, c.LastFM.Username, c.LastFM.Enabled = protected, user, true
+			if c.LastFM.APIKey == cfg.APIKey { // not changed while approving
+				c.LastFM.SessionKey, c.LastFM.Username, c.LastFM.Enabled = protected, user, true
+			}
 		})
 		s.configure()
 		s.setStatus("")

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>YouTube Music Settings</title>
+    <title>Encore Settings</title>
     <style>
       :root { color-scheme: dark; font-family: Inter, "Segoe UI", Arial, sans-serif; }
       body { margin:0; min-height:100vh; background:#171717; color:#f6f6f6; }
@@ -64,9 +64,9 @@
       </nav>
 
       <main id="general" class="hidden">
-        <p class="intro">Control how YouTube Music behaves on your computer.</p>
+        <p class="intro">Control how Encore behaves on your computer.</p>
         <section>
-          <div class="row"><div><strong>Start with Windows</strong><span class="hint">Open YouTube Music when you sign in to Windows.</span></div><label class="switch"><input id="startup" type="checkbox" aria-label="Start with Windows" /><span class="switch-ui"></span></label></div>
+          <div class="row"><div><strong>Start with Windows</strong><span class="hint">Open Encore when you sign in to Windows.</span></div><label class="switch"><input id="startup" type="checkbox" aria-label="Start with Windows" /><span class="switch-ui"></span></label></div>
           <div class="row"><div><strong>Minimize to tray</strong><span class="hint">Keep music playing without a taskbar window.</span></div><label class="switch"><input id="minimize-to-tray" type="checkbox" aria-label="Minimize to tray" /><span class="switch-ui"></span></label></div>
           <div class="row"><div><strong>Close to tray</strong><span class="hint">Closing the player keeps it running in the notification area.</span></div><label class="switch"><input id="close-to-tray" type="checkbox" aria-label="Close to tray" /><span class="switch-ui"></span></label></div>
         </section>
@@ -79,7 +79,7 @@
       <main id="discord" class="hidden">
         <p class="intro">Shows a status only while a song is actively playing. No Discord setup is required.</p>
         <section>
-          <div class="row"><div><strong>Enable Rich Presence</strong><span class="hint">Displays song, artist, album, artwork, and elapsed time. While you host a listen-along session, your status also gets a “Listen along” button for friends.</span></div><label class="switch"><input id="discord-enabled" type="checkbox" aria-label="Enable Discord Rich Presence" /><span class="switch-ui"></span></label></div>
+          <div class="row"><div><strong>Enable Rich Presence</strong><span class="hint">Displays song, artist, album, artwork, and elapsed time, with a “Get Encore” button so friends can get the app. While you host a listen-along session it also gets a “Listen along” button. Discord shows these buttons to others, not to you.</span></div><label class="switch"><input id="discord-enabled" type="checkbox" aria-label="Enable Discord Rich Presence" /><span class="switch-ui"></span></label></div>
         </section>
         <div id="discord-status" class="status"></div>
       </main>
@@ -87,10 +87,11 @@
       <main id="lastfm" class="hidden">
         <p class="intro">Scrobble what you play to your Last.fm profile: a song counts once you've listened to half of it or four minutes.</p>
         <section>
-          <div class="stack">
-            <strong>1. Your Last.fm API account</strong>
+          <div class="stack" id="lastfm-app">
+            <details id="lastfm-own">
+            <summary id="lastfm-own-summary">1. Your Last.fm API account</summary>
             <ol class="steps">
-              <li><button class="link" data-open="https://www.last.fm/api/account/create">Create a free API account</button> (any name, e.g. “YouTube Music Desktop”; the callback URL can stay empty).</li>
+              <li><button class="link" data-open="https://www.last.fm/api/account/create">Create a free API account</button> (any name, e.g. “Encore”; the callback URL can stay empty).</li>
               <li>Copy its API key and shared secret here.</li>
             </ol>
             <label class="field" for="lastfm-key">API key</label>
@@ -98,9 +99,10 @@
             <label class="field" for="lastfm-secret">Shared secret</label>
             <input id="lastfm-secret" type="password" autocomplete="off" spellcheck="false" />
             <div class="actions"><button id="lastfm-save" class="plain">Save</button></div>
+            </details>
           </div>
           <div class="row">
-            <div><strong>2. Your Last.fm account</strong><span class="hint" id="lastfm-account">Connect to approve scrobbling in your browser.</span></div>
+            <div><strong id="lastfm-account-title">2. Your Last.fm account</strong><span class="hint" id="lastfm-account">Connect to approve scrobbling in your browser.</span></div>
             <div class="actions" style="margin:0"><button id="lastfm-connect" class="primary">Connect</button><button id="lastfm-disconnect" class="danger hidden">Disconnect</button></div>
           </div>
           <div class="row"><div><strong>Scrobble</strong><span class="hint">Pause scrobbling without disconnecting.</span></div><label class="switch"><input id="lastfm-enabled" type="checkbox" aria-label="Scrobble to Last.fm" /><span class="switch-ui"></span></label></div>
@@ -193,7 +195,8 @@
           </div>
           <div class="stack" id="follow-lastfm">
             <strong>Through Last.fm: song changes only</strong>
-            <span class="hint">For friends who scrobble Spotify to Last.fm. Uses your Last.fm API key (no sign-in needed). Changes show up within about 10–30 seconds; pauses aren't shared by Last.fm.</span>
+            <span class="hint">For friends who scrobble Spotify to Last.fm. No sign-in needed. Changes show up within about 10–30 seconds; pauses aren't shared by Last.fm.</span>
+            <span class="hint hidden" id="follow-lastfm-nokey">Add a Last.fm API key in the Last.fm tab first.</span>
             <label class="field" for="follow-lastfm-user">Last.fm username</label>
             <input id="follow-lastfm-user" type="text" autocomplete="off" spellcheck="false" />
             <div class="actions"><button id="follow-lastfm-go" class="primary">Follow</button></div>
@@ -239,7 +242,12 @@
           $('#lastfm-account').textContent = lf.connected ? 'Connected as ' + lf.username + '.' : 'Connect to approve scrobbling in your browser.';
           show('#lastfm-connect', !lf.connected);
           show('#lastfm-disconnect', lf.connected);
-          $('#lastfm-connect').disabled = !lf.apiKey || !lf.hasSecret || lf.connecting;
+          // With the app's own API account, the key fields are an optional override.
+          const ownKey = Boolean(lf.apiKey || lf.hasSecret);
+          $('#lastfm-own-summary').textContent = lf.builtIn ? 'Use your own Last.fm API account instead (optional)' : '1. Your Last.fm API account';
+          if (!lf.builtIn || ownKey) $('#lastfm-own').open = true;
+          $('#lastfm-account-title').textContent = lf.builtIn ? 'Your Last.fm account' : '2. Your Last.fm account';
+          $('#lastfm-connect').disabled = !lf.ready || lf.connecting;
           $('#lastfm-enabled').checked = Boolean(lf.enabled);
           $('#lastfm-enabled').disabled = !lf.connected;
           $('#lastfm-status').textContent = lf.status || '';
@@ -265,6 +273,7 @@
           $('#listen-status').textContent = la.status || '';
 
           const fo = s.follow || {};
+          show('#follow-lastfm-nokey', !fo.lastfmKey);
           show('#follow-active', Boolean(fo.mode));
           show('#follow-discord', !fo.mode);
           show('#follow-lastfm', !fo.mode);

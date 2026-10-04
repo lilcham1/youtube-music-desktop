@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Code signing policy and privacy · Encore for YouTube Music</title>
+    <link rel="icon" type="image/svg+xml" href="../img/encore-icon.svg" />
+    <style>
+      :root { color-scheme: dark; font-family: "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, Arial, sans-serif; }
+      body { margin: 0; background: #0e0e0f; color: #f4f4f5; line-height: 1.6; }
+      main { width: min(760px, 100% - 32px); margin: 0 auto; padding: 48px 0 64px; }
+      a { color: #ff9a7a; }
+      .back { display: inline-flex; align-items: center; gap: 8px; color: #a6a6ad; text-decoration: none; font-size: 14px; }
+      .back img { width: 22px; height: 22px; }
+      h1 { margin: 24px 0 8px; font-size: 32px; letter-spacing: -.6px; }
+      h2 { margin: 36px 0 8px; font-size: 21px; }
+      p, li { color: #c4c4ca; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14.5px; }
+      th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid #2a2a2f; }
+      th { color: #f4f4f5; font-weight: 600; }
+      td { color: #c4c4ca; }
+      code { font: 13px ui-monospace, Consolas, monospace; background: #17171a; border: 1px solid #2a2a2f; border-radius: 6px; padding: 1px 6px; }
+      .wrap-table { overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="back" href="../"><img src="../img/encore-icon.svg" alt="" />Encore for YouTube Music</a>
+      <h1>Code signing policy</h1>
+      <p>Encore is free, open-source software under the <a href="https://github.com/lilcham1/youtube-music-desktop/blob/main/LICENSE">GPL-3.0</a>. Its source code is public at <a href="https://github.com/lilcham1/youtube-music-desktop">github.com/lilcham1/youtube-music-desktop</a>.</p>
+      <p>Windows releases are being prepared for free code signing for open-source projects by <a href="https://signpath.io">SignPath.io</a>, with a certificate by <a href="https://signpath.org">SignPath Foundation</a>. Until that is in place, installers are not signed.</p>
+
+      <h2>How releases are built</h2>
+      <ul>
+        <li>Every release is built by GitHub Actions from a version tag in the public repository (<a href="https://github.com/lilcham1/youtube-music-desktop/blob/main/.github/workflows/release.yml">release workflow</a>). No release is built on a personal computer.</li>
+        <li>The build runs the test suite first; a failing test stops the release.</li>
+        <li>Each release publishes the installer and its SHA-512 fingerprint. The app checks that fingerprint before installing an update.</li>
+        <li>Only binaries built from this project's own source code are signed.</li>
+      </ul>
+
+      <h2>Team roles</h2>
+      <div class="wrap-table">
+        <table>
+          <tr><th>Role</th><th>Members</th></tr>
+          <tr><td>Committers and reviewers</td><td><a href="https://github.com/lilcham1">lilcham1</a></td></tr>
+          <tr><td>Approvers (who approve each signing request)</td><td><a href="https://github.com/lilcham1">lilcham1</a></td></tr>
+        </table>
+      </div>
+      <p>Contributions from others are reviewed by a committer before they are merged.</p>
+
+      <h2 id="privacy">Privacy</h2>
+      <p>Encore has no accounts, analytics, telemetry or ads, and its developer receives no data from it. Settings and sign-ins are stored only on your PC, in <code>%USERPROFILE%\.youtube-music</code>; saved secrets (API keys, the Discord bot token) are encrypted with Windows DPAPI for your Windows account.</p>
+      <p>The app connects to these services, and only these:</p>
+      <div class="wrap-table">
+        <table>
+          <tr><th>Service</th><th>When</th><th>What is sent</th></tr>
+          <tr><td>YouTube Music (Google)</td><td>Always: the app shows music.youtube.com</td><td>What any browser sends to YouTube Music, under Google's privacy policy. To match songs for Spotify features, song titles and artists are searched on YouTube Music.</td></tr>
+          <tr><td>GitHub</td><td>At startup, then every 4 hours</td><td>A request for the latest release, to offer updates; the installer is downloaded from GitHub when you update.</td></tr>
+          <tr><td>Discord (on your PC)</td><td>When Discord status is on</td><td>The current song, artist, album, artwork and timer, to the Discord app running on your PC, which shows it on your profile.</td></tr>
+          <tr><td>Discord (online)</td><td>When you set up your own bot to follow friends</td><td>Your bot's token, to connect your bot; the bot receives the statuses of people in servers you added it to.</td></tr>
+          <tr><td>ntfy.sh</td><td>While you host or join a listen-along session</td><td>Playback updates (song, position, paused or playing), end-to-end encrypted with a key that only exists in your session code. ntfy.sh can't read them.</td></tr>
+          <tr><td>Last.fm</td><td>When you connect Last.fm or follow someone there</td><td>Songs you play (scrobbles), or the username you follow.</td></tr>
+          <tr><td>Spotify</td><td>When you play a Spotify playlist</td><td>The playlist link, to read its songs.</td></tr>
+        </table>
+      </div>
+      <p>The app doesn't transfer information to any other networked system unless you ask it to.</p>
+      <p style="margin-top:32px;color:#77777f;font-size:13px">Not affiliated with Google, YouTube, Spotify, Discord or Last.fm. YouTube Music is a trademark of Google LLC.</p>
+    </main>
+  </body>
+</html>

@@ -117,6 +117,18 @@ func TestJoinButtonOnlyWhenHosting(t *testing.T) {
 	}
 }
 
+func TestDownloadButtonFollowsListenAlong(t *testing.T) {
+	only := BuildActivity(Track{Title: "Song", Artist: "A", DownloadURL: "https://example.test/"})
+	if b, _ := only["buttons"].([]map[string]string); len(b) != 1 || b[0]["label"] != "Get Encore" || b[0]["url"] != "https://example.test/" {
+		t.Fatalf("buttons = %#v", only["buttons"])
+	}
+	both := BuildActivity(Track{Title: "Song", Artist: "A", JoinURL: "https://example.test/join/#x", DownloadURL: "https://example.test/"})
+	b, _ := both["buttons"].([]map[string]string)
+	if len(b) != 2 || b[0]["label"] != "Listen along" || b[1]["label"] != "Get Encore" {
+		t.Fatalf("buttons = %#v", both["buttons"])
+	}
+}
+
 func TestRejectedButtonIsDroppedNotTheStatus(t *testing.T) {
 	f := &fakeDiscord{t: t, got: make(chan map[string]any, 4),
 		rejectOn: func(a map[string]any) bool { _, has := a["buttons"]; return has }}

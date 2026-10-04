@@ -34,14 +34,14 @@ func TestNewer(t *testing.T) {
 
 func TestPickInstallerSkipsBlockmapsAndYml(t *testing.T) {
 	rel := release{}
-	for _, n := range []string{"latest.yml", "YouTube-Music-Setup-0.2.0.exe.blockmap", "YouTube-Music-Setup-0.2.0.exe"} {
+	for _, n := range []string{"latest.yml", "Encore-Setup-0.2.0.exe.blockmap", "Encore-Setup-0.2.0.exe"} {
 		rel.Assets = append(rel.Assets, struct {
 			Name string `json:"name"`
 			URL  string `json:"browser_download_url"`
 			Size int64  `json:"size"`
 		}{n, "https://x/" + n, 3})
 	}
-	if name, _, _ := PickInstaller(rel); name != "YouTube-Music-Setup-0.2.0.exe" {
+	if name, _, _ := PickInstaller(rel); name != "Encore-Setup-0.2.0.exe" {
 		t.Fatalf("picked %q", name)
 	}
 }
@@ -61,14 +61,14 @@ func releaseServer(t *testing.T, served, published string, withYML bool) *httpte
 			if withYML {
 				yml = fmt.Sprintf(`,{"name":"latest.yml","browser_download_url":"%s/latest.yml","size":300}`, srv.URL)
 			}
-			fmt.Fprintf(w, `{"tag_name":"v0.3.0","assets":[{"name":"YouTube-Music-Setup-0.3.0.exe","browser_download_url":"%s/dl","size":%d}%s]}`, srv.URL, len(served), yml)
+			fmt.Fprintf(w, `{"tag_name":"v0.3.0","assets":[{"name":"Encore-Setup-0.3.0.exe","browser_download_url":"%s/dl","size":%d}%s]}`, srv.URL, len(served), yml)
 		case "/latest.yml":
 			fmt.Fprintf(w, `version: 0.3.0
 files:
-  - url: YouTube-Music-Setup-0.3.0.exe
+  - url: Encore-Setup-0.3.0.exe
     sha512: %s
     size: %d
-path: YouTube-Music-Setup-0.3.0.exe
+path: Encore-Setup-0.3.0.exe
 sha512: %s
 releaseDate: '2026-10-03T00:00:00.000Z'
 `, sha, len(published), sha)
@@ -86,7 +86,7 @@ func TestCheckDownloadsAndVerifiesNewerRelease(t *testing.T) {
 	var states []State
 	u := &Updater{Feed: srv.URL + "/feed", Current: "0.2.0", Enabled: true, DownloadTo: t.TempDir(),
 		OnStatus: func(s Status) { states = append(states, s.State) }}
-	if s := u.Check(context.Background()); s.State != Downloaded || s.Message != "YouTube Music 0.3.0 is ready to install." {
+	if s := u.Check(context.Background()); s.State != Downloaded || s.Message != "Encore 0.3.0 is ready to install." {
 		t.Fatalf("status = %+v (states %v)", s, states)
 	}
 	data, err := os.ReadFile(u.installer)
@@ -127,14 +127,14 @@ func TestParseLatestYML(t *testing.T) {
 	// The format build.ps1 writes.
 	yml := `version: 0.2.1
 files:
-  - url: YouTube-Music-Setup-0.2.1.exe
+  - url: Encore-Setup-0.2.1.exe
     sha512: AAA==
     size: 4003017
-path: YouTube-Music-Setup-0.2.1.exe
+path: Encore-Setup-0.2.1.exe
 sha512: AAA==
 releaseDate: '2026-10-02T18:16:57.000Z'
 `
-	if got, err := ParseLatestYML([]byte(yml), "YouTube-Music-Setup-0.2.1.exe"); err != nil || got != "AAA==" {
+	if got, err := ParseLatestYML([]byte(yml), "Encore-Setup-0.2.1.exe"); err != nil || got != "AAA==" {
 		t.Fatalf("got %q, %v", got, err)
 	}
 	if _, err := ParseLatestYML([]byte(yml), "Other.exe"); err == nil {
