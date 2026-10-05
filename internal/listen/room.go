@@ -107,6 +107,39 @@ func (r Room) Seal(s State) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return r.seal(plain, r.Topic())
+}
+
+// Open decrypts a relay message. Anything not sealed with this room's key
+// (spam on the topic, tampering, a listener's check-in) is rejected.
+func (r Room) Open(msg string) (State, error) {
+	plain, err := r.open(msg, r.Topic())
+	if err != nil {
+		return State{}, err
+	}
+	var s State
+	return s, json.Unmarshal(plain, &s)
+}
+
+// A check-in is a guest saying "I'm listening", so a host that publishes
+// only while someone listens knows to send updates. It is sealed with a
+// different associated data than states, so guests (including versions
+// before check-ins existed) can never mistake one for the host's playback.
+func (r Room) helloAAD() string { return r.Topic() + "/hello" }
+
+// SealHello encrypts a listener check-in.
+func (r Room) SealHello() (string, error) {
+	return r.seal([]byte(`{"hello":true}`), r.helloAAD())
+}
+
+// OpenHello reports whether msg is a check-in from someone with this
+// room's code.
+func (r Room) OpenHello(msg string) bool {
+	_, err := r.open(msg, r.helloAAD())
+	return err == nil
+}
+
+func (r Room) seal(plain []byte, aad string) (string, error) {
 	aead, err := r.aead()
 	if err != nil {
 		return "", err
@@ -115,28 +148,25 @@ func (r Room) Seal(s State) (string, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
-	sealed := aead.Seal(nonce, nonce, plain, []byte(r.Topic()))
+	sealed := aead.Seal(nonce, nonce, plain, []byte(aad))
 	return base64.RawURLEncoding.EncodeToString(sealed), nil
 }
 
-// Open decrypts a relay message. Anything not sealed with this room's key
-// (spam on the topic, tampering) is rejected.
-func (r Room) Open(msg string) (State, error) {
+func (r Room) open(msg, aad string) ([]byte, error) {
 	data, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(msg))
 	if err != nil {
-		return State{}, err
+		return nil, err
 	}
 	aead, err := r.aead()
 	if err != nil {
-		return State{}, err
+		return nil, err
 	}
 	if len(data) < aead.NonceSize() {
-		return State{}, errors.New("listen: message too short")
+		return nil, errors.New("listen: message too short")
 	}
-	plain, err := aead.Open(nil, data[:aead.NonceSize()], data[aead.NonceSize():], []byte(r.Topic()))
+	plain, err := aead.Open(nil, data[:aead.NonceSize()], data[aead.NonceSize():], []byte(aad))
 	if err != nil {
-		return State{}, errors.New("listen: message is not from this room")
+		return nil, errors.New("listen: message is not from this room")
 	}
-	var s State
-	return s, json.Unmarshal(plain, &s)
+	return plain, nil
 }

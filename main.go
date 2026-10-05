@@ -35,13 +35,9 @@ import (
 )
 
 // Set by release builds: -ldflags "-X main.version=0.2.0 -X main.updatesEnabled=true".
-// The app's own Last.fm API account comes from the LASTFM_API_KEY and
-// LASTFM_SHARED_SECRET build secrets; without it users add their own.
 var (
-	version         = "0.2.0-dev"
-	updatesEnabled  = "false"
-	lastfmAPIKey    = ""
-	lastfmAppSecret = ""
+	version        = "0.2.0-dev"
+	updatesEnabled = "false"
 )
 
 const (
@@ -73,10 +69,7 @@ type desktop struct {
 	thumbs                     taskbar.ThumbBar // UI thread only
 	presence                   *presence
 	updates                    *updater.Updater
-	scrobbler                  *scrobbler
-	queue                      *spotifyQueue
 	listen                     *listenAlong
-	follow                     *follower
 	playerJS                   string
 	profile, settingsPath, exe string
 	startHidden                bool
@@ -92,7 +85,6 @@ type desktop struct {
 	now         Playback  // latest playback report
 	nowAt       time.Time // when it arrived
 	pendingJoin string    // listen-along code received before the player was ready
-	ytVersion   string    // YouTube Music's web client version, for song search
 }
 
 // resizeEdges are the edge names Wails' "wails:resize:<edge>" accepts.
@@ -171,10 +163,7 @@ func main() {
 		DownloadTo: filepath.Join(os.TempDir(), "encore-update"),
 		OnStatus:   func(updater.Status) { d.pushSettingsState() },
 	}
-	d.scrobbler = newScrobbler(d)
-	d.queue = &spotifyQueue{d: d}
 	d.listen = &listenAlong{d: d, relay: &listen.Relay{}}
-	d.follow = newFollower(d)
 	d.windowSaver = newDebouncer(700*time.Millisecond, d.saveWindowState)
 	d.miniSaver = newDebouncer(700*time.Millisecond, d.saveMiniState)
 
@@ -183,8 +172,6 @@ func main() {
 	d.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		application.InvokeAsync(d.attachChildren)
 		go d.updateLoop()
-		go d.scrobbler.run()
-		d.follow.startBot()
 	})
 
 	if err := d.app.Run(); err != nil {
@@ -384,10 +371,8 @@ func (d *desktop) quit() {
 func (d *desktop) shutdown() {
 	d.windowSaver.Flush()
 	d.miniSaver.Flush()
-	d.listen.Stop()
-	d.follow.stopIfActive("")
+	d.listen.Shutdown()
 	d.presence.Close()
-	d.scrobbler.flush()
 	log.Print("shut down")
 }
 

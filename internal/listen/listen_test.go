@@ -70,6 +70,29 @@ func TestSealOpenRejectsOtherRoomsAndTampering(t *testing.T) {
 	}
 }
 
+func TestCheckInsAndStatesNeverMix(t *testing.T) {
+	r, _ := NewRoom()
+	hello, err := r.SealHello()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.OpenHello(hello) {
+		t.Fatal("a check-in must open as a check-in")
+	}
+	// Guests, including ones from before check-ins existed, only call Open.
+	if _, err := r.Open(hello); err == nil {
+		t.Fatal("a check-in must never open as the host's playback")
+	}
+	state, _ := r.Seal(State{Seq: 1, VideoID: "abc", Playing: true})
+	if r.OpenHello(state) {
+		t.Fatal("a state is not a check-in")
+	}
+	other, _ := NewRoom()
+	if other.OpenHello(hello) || r.OpenHello("spam") {
+		t.Fatal("only someone with this room's code can check in")
+	}
+}
+
 var now0 = time.Date(2026, 10, 3, 20, 0, 0, 0, time.UTC)
 
 func TestHostPublishesOnlyRealChanges(t *testing.T) {

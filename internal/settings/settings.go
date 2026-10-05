@@ -26,12 +26,15 @@ const defaultVolume = 20
 const EngineScale = "engine"
 
 type Settings struct {
-	DiscordEnabled   bool
-	DiscordAppID     string
-	MinimizeToTray   bool
-	CloseToTray      bool
-	StartWithWindows bool
-	Volume           int
+	DiscordEnabled bool
+	// DiscordListenAlong keeps a listen-along session running while the
+	// Discord status is on, so it always has a "Listen along" button.
+	DiscordListenAlong bool
+	DiscordAppID       string
+	MinimizeToTray     bool
+	CloseToTray        bool
+	StartWithWindows   bool
+	Volume             int
 
 	// Migration markers, see Load.
 	WindowBehaviorVersion int
@@ -41,10 +44,6 @@ type Settings struct {
 	Window *WindowState
 	// MiniPlayer is the mini player's last position and visibility.
 	MiniPlayer *MiniPlayer
-	LastFM     LastFM
-	Spotify    Spotify
-	// DiscordBot is the user's own bot, used to follow Spotify listeners.
-	DiscordBot DiscordBot
 
 	extra map[string]json.RawMessage
 }
@@ -64,40 +63,15 @@ type MiniPlayer struct {
 	Open bool `json:"open"`
 }
 
-// LastFM holds scrobbling credentials. Secret and SessionKey are stored
-// protected with Windows DPAPI (see internal/secret), never in plain text.
-type LastFM struct {
-	APIKey     string `json:"apiKey,omitempty"`
-	Secret     string `json:"secret,omitempty"`
-	SessionKey string `json:"sessionKey,omitempty"`
-	Username   string `json:"username,omitempty"`
-	Enabled    bool   `json:"enabled,omitempty"`
-}
-
-func (l LastFM) empty() bool { return l == LastFM{} }
-
-// Spotify holds the user's own Spotify developer app credentials.
-// ClientSecret is stored protected with Windows DPAPI.
-type Spotify struct {
-	ClientID     string `json:"clientId,omitempty"`
-	ClientSecret string `json:"clientSecret,omitempty"`
-	// FallbackNoted is set once the user has been told that this app is
-	// refused and playlists come from Spotify's public page instead.
-	FallbackNoted bool `json:"fallbackNoted,omitempty"`
-}
-
-func (sp Spotify) empty() bool { return sp == Spotify{} }
-
-// DiscordBot holds the bot token, stored protected with Windows DPAPI.
-type DiscordBot struct {
-	Token string `json:"token,omitempty"`
-}
-
-func (b DiscordBot) empty() bool { return b == DiscordBot{} }
+// removedKeys belonged to features that were taken out (Last.fm, Spotify
+// and the Discord bot for following Spotify listeners). They held
+// credentials, so they are deleted from the file rather than preserved.
+var removedKeys = []string{"lastfm", "spotify", "discordBot"}
 
 func Defaults() Settings {
 	return Settings{
 		DiscordAppID:          DiscordApplicationID,
+		DiscordListenAlong:    true,
 		Volume:                defaultVolume,
 		WindowBehaviorVersion: 1,
 		VolumeScale:           EngineScale,
@@ -107,6 +81,7 @@ func Defaults() Settings {
 // raw mirrors the file with pointers so absent keys can be told apart.
 type raw struct {
 	DiscordEnabled        *bool    `json:"discordEnabled"`
+	DiscordListenAlong    *bool    `json:"discordListenAlong"`
 	DiscordAppID          *string  `json:"discordAppId"`
 	MinimizeToTray        *bool    `json:"minimizeToTray"`
 	CloseToTray           *bool    `json:"closeToTray"`
@@ -118,9 +93,6 @@ type raw struct {
 
 	Window     *WindowState `json:"window"`
 	MiniPlayer *MiniPlayer  `json:"miniPlayer"`
-	LastFM     *LastFM      `json:"lastfm"`
-	Spotify    *Spotify     `json:"spotify"`
-	DiscordBot *DiscordBot  `json:"discordBot"`
 }
 
 // Load reads path, applies migrations and rewrites the file if anything
@@ -148,6 +120,7 @@ func Load(path string) (Settings, error) {
 		}
 	}
 	set(&s.DiscordEnabled, r.DiscordEnabled)
+	set(&s.DiscordListenAlong, r.DiscordListenAlong)
 	set(&s.MinimizeToTray, r.MinimizeToTray)
 	set(&s.CloseToTray, r.CloseToTray)
 	set(&s.StartWithWindows, r.StartWithWindows)
@@ -158,17 +131,13 @@ func Load(path string) (Settings, error) {
 		s.Window = r.Window
 	}
 	s.MiniPlayer = r.MiniPlayer
-	if r.LastFM != nil {
-		s.LastFM = *r.LastFM
-	}
-	if r.Spotify != nil {
-		s.Spotify = *r.Spotify
-	}
-	if r.DiscordBot != nil {
-		s.DiscordBot = *r.DiscordBot
-	}
 
 	changed := false
+	for _, k := range removedKeys {
+		if _, ok := extra[k]; ok {
+			changed = true
+		}
+	}
 	// v0.1.16 changed the window behaviour: minimize keeps the taskbar entry
 	// and close exits. Choices made afterwards are preserved.
 	if r.WindowBehaviorVersion == nil || *r.WindowBehaviorVersion != 1 {
@@ -236,6 +205,7 @@ func (s Settings) MarshalJSON() ([]byte, error) {
 	// Superseded by the engine scale; a stale copy would confuse older builds.
 	delete(out, "sliderVolume")
 	out["discordEnabled"] = s.DiscordEnabled
+	out["discordListenAlong"] = s.DiscordListenAlong
 	out["discordAppId"] = s.DiscordAppID
 	out["minimizeToTray"] = s.MinimizeToTray
 	out["closeToTray"] = s.CloseToTray
@@ -252,9 +222,9 @@ func (s Settings) MarshalJSON() ([]byte, error) {
 	}
 	setOrDelete("window", s.Window, s.Window != nil)
 	setOrDelete("miniPlayer", s.MiniPlayer, s.MiniPlayer != nil)
-	setOrDelete("lastfm", s.LastFM, !s.LastFM.empty())
-	setOrDelete("spotify", s.Spotify, !s.Spotify.empty())
-	setOrDelete("discordBot", s.DiscordBot, !s.DiscordBot.empty())
+	for _, k := range removedKeys {
+		delete(out, k)
+	}
 	return json.MarshalIndent(out, "", "  ")
 }
 

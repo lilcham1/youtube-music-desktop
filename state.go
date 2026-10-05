@@ -29,20 +29,18 @@ func (d *desktop) applyPlayerVolume(init bool) {
 func (d *desktop) state() map[string]any {
 	cfg := d.config()
 	return map[string]any{
-		"volume":           cfg.Volume,
-		"discordEnabled":   cfg.DiscordEnabled,
-		"minimizeToTray":   cfg.MinimizeToTray,
-		"closeToTray":      cfg.CloseToTray,
-		"startWithWindows": startup.Enabled(),
-		"maximized":        d.shell.IsMaximised(),
-		"miniOpen":         cfg.MiniPlayer != nil && cfg.MiniPlayer.Open,
-		"version":          strings.TrimSuffix(version, "-dev"),
-		"discordStatus":    d.presence.Status(),
-		"update":           d.updates.Status(),
-		"lastfm":           d.scrobbler.state(),
-		"spotify":          d.queue.state(),
-		"listen":           d.listen.state(),
-		"follow":           d.follow.state(),
+		"volume":             cfg.Volume,
+		"discordEnabled":     cfg.DiscordEnabled,
+		"discordListenAlong": cfg.DiscordListenAlong,
+		"minimizeToTray":     cfg.MinimizeToTray,
+		"closeToTray":        cfg.CloseToTray,
+		"startWithWindows":   startup.Enabled(),
+		"maximized":          d.shell.IsMaximised(),
+		"miniOpen":           cfg.MiniPlayer != nil && cfg.MiniPlayer.Open,
+		"version":            strings.TrimSuffix(version, "-dev"),
+		"discordStatus":      d.presence.Status(),
+		"update":             d.updates.Status(),
+		"listen":             d.listen.state(),
 	}
 }
 

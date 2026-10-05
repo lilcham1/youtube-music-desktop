@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -73,8 +74,13 @@ func (d *desktop) restoreWindowState() (maximize bool) {
 // saveWindowState records the window's normal bounds, and whether it is
 // maximised. Bounds are not overwritten while maximised or minimised, so
 // restoring from maximised returns to the last normal size.
+// devBuild is true for builds without a release version. They share the
+// real profile (to test with its sign-in) but don't save window positions,
+// so test runs don't move the installed app's windows.
+var devBuild = strings.HasSuffix(version, "-dev")
+
 func (d *desktop) saveWindowState() {
-	if d.shell == nil || d.shell.IsMinimised() || !d.shell.IsVisible() {
+	if devBuild || d.shell == nil || d.shell.IsMinimised() || !d.shell.IsVisible() {
 		return
 	}
 	maximized := d.shell.IsMaximised()
@@ -137,7 +143,7 @@ func (d *desktop) setMiniOpen(open bool) {
 }
 
 func (d *desktop) saveMiniState() {
-	if d.mini == nil || !d.mini.IsVisible() {
+	if devBuild || d.mini == nil || !d.mini.IsVisible() {
 		return
 	}
 	x, y := d.mini.Position()

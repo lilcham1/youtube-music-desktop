@@ -84,6 +84,9 @@ func TestSetActivityAndArtworkFallback(t *testing.T) {
 	if _, dup := assets["large_text"]; dup {
 		t.Fatal("album equal to title must not be repeated")
 	}
+	if assets["small_image"] != encoreIconURL || assets["small_text"] != "Encore for YouTube Music" {
+		t.Fatalf("the badge must show Encore: %v", assets)
+	}
 	if _, has := second["assets"]; has {
 		t.Fatal("retry must drop assets")
 	}

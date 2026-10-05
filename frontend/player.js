@@ -2,7 +2,7 @@
 // mutes, pauses or plays media and never writes the <video> element's volume.
 // Playback only changes through the explicit commands at the end of this
 // file, which the app sends when you press a control (tray, taskbar, mini
-// player) or use listen along or a Spotify queue.
+// player) or use listen along.
 //
 // Volume model: the app stores the player *engine* level (what you hear) and
 // applies it with #movie_player.setVolume, which exists in both of YouTube
@@ -203,12 +203,10 @@
     if (!wanted) mp.pauseVideo();
     else if (!isPlaying()) mp.playVideo();
   };
-  // Starts a song (optionally inside a playlist) through YouTube Music's own
-  // navigation, so the page is not reloaded and no "Leave site?" prompt
-  // appears while something is playing.
-  const watch = ({ videoId, playlistId, startSeconds }) => {
+  // Starts a song through YouTube Music's own navigation, so the page is not
+  // reloaded and no "Leave site?" prompt appears while something is playing.
+  const watch = ({ videoId, startSeconds }) => {
     const endpoint = { videoId };
-    if (playlistId) endpoint.playlistId = playlistId;
     if (startSeconds > 0) endpoint.startTimeSeconds = Math.floor(startSeconds);
     app()?.resolveCommand?.({ watchEndpoint: endpoint });
   };
@@ -248,7 +246,6 @@
     next: () => player()?.nextVideo?.(),
     previous: () => player()?.previousVideo?.(),
     seek: (seconds) => player()?.seekTo?.(Number(seconds) || 0, true),
-    watch,
     follow,
   };
   // </commands>
@@ -285,6 +282,5 @@
   new MutationObserver(scheduleInstall).observe(document.documentElement, { childList: true, subtree: true });
   attachVideoEvents();
   schedulePlaybackReport();
-  // The client version lets the app use YouTube Music's song search.
-  send('ready', { clientVersion: window.ytcfg?.get?.('INNERTUBE_CLIENT_VERSION') || '' });
+  send('ready');
 })();

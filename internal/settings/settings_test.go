@@ -143,14 +143,11 @@ func TestFeatureSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Window != nil || s.MiniPlayer != nil || !s.LastFM.empty() || !s.Spotify.empty() {
+	if s.Window != nil || s.MiniPlayer != nil {
 		t.Fatalf("new fields must start empty: %+v", s)
 	}
 	s.Window = &WindowState{X: -1200, Y: 40, Width: 1100, Height: 700, Maximized: true}
 	s.MiniPlayer = &MiniPlayer{X: 10, Y: 20, Open: true}
-	s.LastFM = LastFM{APIKey: "k", Secret: "dpapi:x", SessionKey: "dpapi:y", Username: "me", Enabled: true}
-	s.Spotify = Spotify{ClientID: "id", ClientSecret: "dpapi:z"}
-	s.DiscordBot = DiscordBot{Token: "dpapi:t"}
 	if err := Save(path, s); err != nil {
 		t.Fatal(err)
 	}
@@ -158,20 +155,25 @@ func TestFeatureSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *got.Window != *s.Window || *got.MiniPlayer != *s.MiniPlayer || got.LastFM != s.LastFM || got.Spotify != s.Spotify || got.DiscordBot != s.DiscordBot || got.Volume != 3 {
+	if *got.Window != *s.Window || *got.MiniPlayer != *s.MiniPlayer || got.Volume != 3 {
 		t.Fatalf("round trip lost data: %+v", got)
 	}
-	// Clearing a feature removes its key instead of leaving stale credentials.
-	got.LastFM, got.Spotify = LastFM{}, Spotify{}
-	if err := Save(path, got); err != nil {
+}
+
+func TestRemovedFeatureCredentialsAreDeleted(t *testing.T) {
+	path := write(t, `{"volume":3,"volumeScale":"engine","windowBehaviorVersion":1,"keep":1,
+		"lastfm":{"apiKey":"k","secret":"dpapi:x"},"spotify":{"clientId":"id"},"discordBot":{"token":"dpapi:t"}}`)
+	if _, err := Load(path); err != nil {
 		t.Fatal(err)
 	}
 	m := readMap(t, path)
-	if _, ok := m["lastfm"]; ok {
-		t.Fatal("cleared lastfm must be removed")
+	for _, k := range []string{"lastfm", "spotify", "discordBot"} {
+		if _, ok := m[k]; ok {
+			t.Fatalf("%s must be removed from the file on load", k)
+		}
 	}
-	if _, ok := m["spotify"]; ok {
-		t.Fatal("cleared spotify must be removed")
+	if _, ok := m["keep"]; !ok {
+		t.Fatal("other unknown keys are still preserved")
 	}
 }
 
@@ -182,5 +184,16 @@ func TestInvalidWindowStateIsIgnored(t *testing.T) {
 	}
 	if s.Window != nil {
 		t.Fatalf("a zero-size window must be ignored: %+v", s.Window)
+	}
+}
+
+func TestDiscordListenAlongIsOnUnlessTurnedOff(t *testing.T) {
+	s, err := Load(write(t, `{"volume":20,"volumeScale":"engine","windowBehaviorVersion":1}`))
+	if err != nil || !s.DiscordListenAlong {
+		t.Fatalf("default: %v %v", s.DiscordListenAlong, err)
+	}
+	s, err = Load(write(t, `{"discordListenAlong":false,"volume":20,"volumeScale":"engine","windowBehaviorVersion":1}`))
+	if err != nil || s.DiscordListenAlong {
+		t.Fatalf("turned off: %v %v", s.DiscordListenAlong, err)
 	}
 }

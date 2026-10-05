@@ -58,8 +58,6 @@
       <nav>
         <button data-tab="general">General</button>
         <button data-tab="discord">Discord</button>
-        <button data-tab="lastfm">Last.fm</button>
-        <button data-tab="spotify">Spotify</button>
         <button data-tab="listen">Listen along</button>
       </nav>
 
@@ -79,64 +77,10 @@
       <main id="discord" class="hidden">
         <p class="intro">Shows a status only while a song is actively playing. No Discord setup is required.</p>
         <section>
-          <div class="row"><div><strong>Enable Rich Presence</strong><span class="hint">Displays song, artist, album, artwork, and elapsed time, with a “Get Encore” button so friends can get the app. While you host a listen-along session it also gets a “Listen along” button. Discord shows these buttons to others, not to you.</span></div><label class="switch"><input id="discord-enabled" type="checkbox" aria-label="Enable Discord Rich Presence" /><span class="switch-ui"></span></label></div>
+          <div class="row"><div><strong>Enable Rich Presence</strong><span class="hint">Displays song, artist, album, artwork, and elapsed time, with a “Get Encore” button so friends can get the app. Discord shows status buttons to others, not to you.</span></div><label class="switch"><input id="discord-enabled" type="checkbox" aria-label="Enable Discord Rich Presence" /><span class="switch-ui"></span></label></div>
+          <div class="row"><div><strong>“Listen along” button</strong><span class="hint">Friends with Encore can press it on your status to hear what you play, in sync. Keeps a listen-along session running while your status is on.</span></div><label class="switch"><input id="discord-listen" type="checkbox" aria-label="Show a Listen along button on your Discord status" /><span class="switch-ui"></span></label></div>
         </section>
         <div id="discord-status" class="status"></div>
-      </main>
-
-      <main id="lastfm" class="hidden">
-        <p class="intro">Scrobble what you play to your Last.fm profile: a song counts once you've listened to half of it or four minutes.</p>
-        <section>
-          <div class="stack" id="lastfm-app">
-            <details id="lastfm-own">
-            <summary id="lastfm-own-summary">1. Your Last.fm API account</summary>
-            <ol class="steps">
-              <li><button class="link" data-open="https://www.last.fm/api/account/create">Create a free API account</button> (any name, e.g. “Encore”; the callback URL can stay empty).</li>
-              <li>Copy its API key and shared secret here.</li>
-            </ol>
-            <label class="field" for="lastfm-key">API key</label>
-            <input id="lastfm-key" type="text" autocomplete="off" spellcheck="false" />
-            <label class="field" for="lastfm-secret">Shared secret</label>
-            <input id="lastfm-secret" type="password" autocomplete="off" spellcheck="false" />
-            <div class="actions"><button id="lastfm-save" class="plain">Save</button></div>
-            </details>
-          </div>
-          <div class="row">
-            <div><strong id="lastfm-account-title">2. Your Last.fm account</strong><span class="hint" id="lastfm-account">Connect to approve scrobbling in your browser.</span></div>
-            <div class="actions" style="margin:0"><button id="lastfm-connect" class="primary">Connect</button><button id="lastfm-disconnect" class="danger hidden">Disconnect</button></div>
-          </div>
-          <div class="row"><div><strong>Scrobble</strong><span class="hint">Pause scrobbling without disconnecting.</span></div><label class="switch"><input id="lastfm-enabled" type="checkbox" aria-label="Scrobble to Last.fm" /><span class="switch-ui"></span></label></div>
-        </section>
-        <div id="lastfm-status" class="status"></div>
-      </main>
-
-      <main id="spotify" class="hidden">
-        <p class="intro">Play a Spotify playlist here: each song is looked up on YouTube Music and played in order as your queue. Nothing is saved to either account.</p>
-        <section>
-          <div class="stack">
-            <strong>Play a playlist</strong>
-            <span class="hint">Paste a link from Spotify (Share → Copy link to playlist). Any public playlist works without setup; Spotify's public page lists up to 100 songs.</span>
-            <label class="field" for="spotify-link">Playlist link</label>
-            <input id="spotify-link" type="text" placeholder="https://open.spotify.com/playlist/…" autocomplete="off" spellcheck="false" />
-            <div class="actions"><button id="spotify-play" class="primary">Play</button><button id="spotify-stop" class="plain hidden">Stop</button></div>
-            <div id="spotify-status" class="status"></div>
-            <details id="spotify-missing" class="hidden"><summary>Songs not found on YouTube Music</summary><ul></ul></details>
-          </div>
-          <div class="stack">
-            <strong>Your Spotify app (optional)</strong>
-            <span class="hint">Only needed for playlists over 100 songs, and only works if your Spotify account has Premium: Spotify requires the app's owner to have Premium.</span>
-            <ol class="steps">
-              <li><button class="link" data-open="https://developer.spotify.com/dashboard">Open the Spotify developer dashboard</button>, sign in, and choose Create app.</li>
-              <li>Any name and description; as Redirect URI enter <code>http://127.0.0.1:8888/callback</code> (it isn't used); tick Web API.</li>
-              <li>Open the app's Settings and copy the Client ID and Client secret here.</li>
-            </ol>
-            <label class="field" for="spotify-id">Client ID</label>
-            <input id="spotify-id" type="text" autocomplete="off" spellcheck="false" />
-            <label class="field" for="spotify-secret">Client secret</label>
-            <input id="spotify-secret" type="password" autocomplete="off" spellcheck="false" />
-            <div class="actions"><button id="spotify-save" class="plain">Save</button></div>
-          </div>
-        </section>
       </main>
 
       <main id="listen" class="hidden">
@@ -167,42 +111,6 @@
         </section>
         <div id="listen-status" class="status"></div>
         <p class="hint" style="max-width:none">Sync messages travel through the public ntfy.sh relay, end-to-end encrypted with a key that only exists in the code. The relay cannot see what you play.</p>
-
-        <h2 style="margin:28px 0 0;font-size:16px">Follow someone on Spotify</h2>
-        <p class="intro" style="margin-top:6px">Play along with a friend who listens on Spotify: their songs play here on YouTube Music.</p>
-        <section>
-          <div class="stack hidden" id="follow-active">
-            <strong id="follow-title">Following</strong>
-            <span class="hint" id="follow-now"></span>
-            <div class="actions"><button id="follow-stop" class="danger">Stop following</button></div>
-          </div>
-          <div class="stack" id="follow-discord">
-            <strong>Through Discord: live, with skips, seeks and pauses</strong>
-            <span class="hint">Works for friends who show Spotify on their Discord profile and share a server with your bot.</span>
-            <div id="follow-listeners" class="actions" style="flex-direction:column;align-items:stretch"></div>
-            <div id="follow-bot-status" class="status"></div>
-            <details id="follow-bot-setup">
-              <summary>Set up your Discord bot (one time, about 5 minutes)</summary>
-              <ol class="steps">
-                <li><button class="link" data-open="https://discord.com/developers/applications">Open the Discord developer portal</button> → <b>New Application</b> (any name).</li>
-                <li>Open <b>Bot</b>: switch on <b>Presence Intent</b> and <b>Server Members Intent</b>, save, then <b>Reset Token</b> and copy the token here.</li>
-                <li>Once connected, use <b>Copy invite link</b> below to add the bot to a server you share with your friends.</li>
-              </ol>
-              <label class="field" for="bot-token">Bot token</label>
-              <input id="bot-token" type="password" autocomplete="off" spellcheck="false" />
-              <div class="actions"><button id="bot-save" class="plain">Save and connect</button><button id="bot-invite" class="plain hidden">Copy invite link</button><button id="bot-remove" class="danger hidden">Remove bot</button></div>
-            </details>
-          </div>
-          <div class="stack" id="follow-lastfm">
-            <strong>Through Last.fm: song changes only</strong>
-            <span class="hint">For friends who scrobble Spotify to Last.fm. No sign-in needed. Changes show up within about 10–30 seconds; pauses aren't shared by Last.fm.</span>
-            <span class="hint hidden" id="follow-lastfm-nokey">Add a Last.fm API key in the Last.fm tab first.</span>
-            <label class="field" for="follow-lastfm-user">Last.fm username</label>
-            <input id="follow-lastfm-user" type="text" autocomplete="off" spellcheck="false" />
-            <div class="actions"><button id="follow-lastfm-go" class="primary">Follow</button></div>
-          </div>
-        </section>
-        <div id="follow-status" class="status"></div>
       </main>
     </div>
     <script>
@@ -210,7 +118,7 @@
       const $ = (selector) => document.querySelector(selector);
       const show = (selector, visible) => $(selector).classList.toggle('hidden', !visible);
       const updateButton = $('#check-updates');
-      const tabs = ['general', 'discord', 'lastfm', 'spotify', 'listen'];
+      const tabs = ['general', 'discord', 'listen'];
       let current = {};
 
       const select = (name) => {
@@ -228,6 +136,7 @@
           $('#minimize-to-tray').checked = Boolean(s.minimizeToTray);
           $('#close-to-tray').checked = Boolean(s.closeToTray);
           $('#discord-enabled').checked = Boolean(s.discordEnabled);
+          $('#discord-listen').checked = Boolean(s.discordListenAlong);
           $('#discord-status').textContent = s.discordStatus || '';
           $('#version').textContent = 'Installed version ' + (s.version || 'unknown') + '.';
           const update = s.update || {};
@@ -235,33 +144,6 @@
           updateButton.disabled = update.state === 'checking' || update.state === 'downloading';
           updateButton.textContent = update.state === 'downloaded' ? 'Restart and install' : 'Check for updates';
           updateButton.dataset.state = update.state || '';
-
-          const lf = s.lastfm || {};
-          if (document.activeElement !== $('#lastfm-key')) $('#lastfm-key').value = lf.apiKey || '';
-          $('#lastfm-secret').placeholder = lf.hasSecret ? 'Saved (hidden)' : '';
-          $('#lastfm-account').textContent = lf.connected ? 'Connected as ' + lf.username + '.' : 'Connect to approve scrobbling in your browser.';
-          show('#lastfm-connect', !lf.connected);
-          show('#lastfm-disconnect', lf.connected);
-          // With the app's own API account, the key fields are an optional override.
-          const ownKey = Boolean(lf.apiKey || lf.hasSecret);
-          $('#lastfm-own-summary').textContent = lf.builtIn ? 'Use your own Last.fm API account instead (optional)' : '1. Your Last.fm API account';
-          if (!lf.builtIn || ownKey) $('#lastfm-own').open = true;
-          $('#lastfm-account-title').textContent = lf.builtIn ? 'Your Last.fm account' : '2. Your Last.fm account';
-          $('#lastfm-connect').disabled = !lf.ready || lf.connecting;
-          $('#lastfm-enabled').checked = Boolean(lf.enabled);
-          $('#lastfm-enabled').disabled = !lf.connected;
-          $('#lastfm-status').textContent = lf.status || '';
-
-          const sp = s.spotify || {};
-          if (document.activeElement !== $('#spotify-id')) $('#spotify-id').value = sp.clientId || '';
-          $('#spotify-secret').placeholder = sp.hasSecret ? 'Saved (hidden)' : '';
-          $('#spotify-play').disabled = Boolean(sp.busy);
-          show('#spotify-stop', sp.busy || sp.active);
-          $('#spotify-status').textContent = sp.status || '';
-          const missing = sp.missing || [];
-          show('#spotify-missing', missing.length > 0);
-          const list = $('#spotify-missing ul');
-          list.replaceChildren(...missing.map((m) => Object.assign(document.createElement('li'), { textContent: m })));
 
           const la = s.listen || {};
           show('#listen-idle', !la.mode);
@@ -271,44 +153,6 @@
           $('#listen-code-out').textContent = la.code || '';
           $('#listen-now').textContent = la.following ? 'Now: ' + la.following : 'Waiting for the host…';
           $('#listen-status').textContent = la.status || '';
-
-          const fo = s.follow || {};
-          show('#follow-lastfm-nokey', !fo.lastfmKey);
-          show('#follow-active', Boolean(fo.mode));
-          show('#follow-discord', !fo.mode);
-          show('#follow-lastfm', !fo.mode);
-          $('#follow-title').textContent = fo.mode ? 'Following ' + fo.name + (fo.mode === 'discord' ? ' (Discord)' : ' (Last.fm)') : '';
-          $('#follow-now').textContent = fo.following ? 'Now: ' + fo.following : 'Waiting for their next song…';
-          $('#follow-status').textContent = fo.status || '';
-          $('#bot-token').placeholder = fo.botConfigured ? 'Saved (hidden)' : '';
-          show('#bot-invite', Boolean(fo.inviteUrl));
-          show('#bot-remove', Boolean(fo.botConfigured));
-          let botStatus = 'No bot set up yet.';
-          if (fo.botConfigured) {
-            botStatus = fo.botError || (fo.botConnected
-              ? 'Connected as ' + fo.botName + ' in ' + fo.botServers + ' server' + (fo.botServers === 1 ? '' : 's') + '.' + (fo.botServers ? '' : ' Add it to a server with "Copy invite link".')
-              : 'Connecting to Discord…');
-          }
-          $('#follow-bot-status').textContent = botStatus;
-          if (!fo.botConfigured || fo.botError) $('#follow-bot-setup').open = true;
-          const people = fo.listeners || [];
-          const listenerList = $('#follow-listeners');
-          if (fo.botConnected && people.length === 0) {
-            listenerList.replaceChildren(Object.assign(document.createElement('span'), { className: 'hint', textContent: 'Nobody in your bot\'s servers is playing Spotify right now.' }));
-          } else {
-            listenerList.replaceChildren(...people.map((p) => {
-              const row = document.createElement('div');
-              row.className = 'row';
-              row.style.cssText = 'padding:8px 0;border:0';
-              const info = document.createElement('div');
-              info.append(Object.assign(document.createElement('strong'), { textContent: p.name }),
-                Object.assign(document.createElement('span'), { className: 'hint', textContent: p.title + ' — ' + p.artist }));
-              const button = Object.assign(document.createElement('button'), { className: 'primary', textContent: 'Follow' });
-              button.addEventListener('click', () => send('follow-discord', { key: p.id }));
-              row.append(info, button);
-              return row;
-            }));
-          }
         },
       };
 
@@ -326,24 +170,9 @@
         $('#general-status').textContent = 'Saved';
       });
       $('#discord-enabled').addEventListener('change', () => send('save', { settings: { discordEnabled: $('#discord-enabled').checked } }));
+      $('#discord-listen').addEventListener('change', () => send('save', { settings: { discordListenAlong: $('#discord-listen').checked } }));
       updateButton.addEventListener('click', () => send(updateButton.dataset.state === 'downloaded' ? 'install-update' : 'check-updates'));
       $('#quit').addEventListener('click', () => send('quit'));
-
-      $('#lastfm-save').addEventListener('click', () => {
-        send('lastfm-save', { key: $('#lastfm-key').value, secret: $('#lastfm-secret').value });
-        $('#lastfm-secret').value = '';
-      });
-      $('#lastfm-connect').addEventListener('click', () => send('lastfm-connect'));
-      $('#lastfm-disconnect').addEventListener('click', () => send('lastfm-disconnect'));
-      $('#lastfm-enabled').addEventListener('change', () => send('lastfm-enable', { flag: $('#lastfm-enabled').checked }));
-
-      $('#spotify-save').addEventListener('click', () => {
-        send('spotify-save', { key: $('#spotify-id').value, secret: $('#spotify-secret').value });
-        $('#spotify-secret').value = '';
-      });
-      $('#spotify-play').addEventListener('click', () => send('spotify-play', { url: $('#spotify-link').value }));
-      $('#spotify-link').addEventListener('keydown', (e) => { if (e.key === 'Enter') send('spotify-play', { url: $('#spotify-link').value }); });
-      $('#spotify-stop').addEventListener('click', () => send('spotify-stop'));
 
       $('#listen-host').addEventListener('click', () => send('listen-host'));
       $('#listen-join').addEventListener('click', () => send('listen-join', { text: $('#listen-code').value }));
@@ -352,13 +181,6 @@
       $('#listen-leave').addEventListener('click', () => send('listen-stop'));
       $('#listen-copy-code').addEventListener('click', () => { send('copy', { text: current.listen?.code || '' }); $('#listen-status').textContent = 'Code copied.'; });
       $('#listen-copy-link').addEventListener('click', () => { send('copy', { text: current.listen?.joinUrl || '' }); $('#listen-status').textContent = 'Link copied.'; });
-
-      $('#bot-save').addEventListener('click', () => { send('bot-save', { secret: $('#bot-token').value }); $('#bot-token').value = ''; });
-      $('#bot-remove').addEventListener('click', () => send('bot-save', { secret: '' }));
-      $('#bot-invite').addEventListener('click', () => { send('copy', { text: current.follow?.inviteUrl || '' }); $('#follow-status').textContent = 'Invite link copied. Open it in your browser and pick a server you share with your friends.'; });
-      $('#follow-lastfm-go').addEventListener('click', () => send('follow-lastfm', { text: $('#follow-lastfm-user').value }));
-      $('#follow-lastfm-user').addEventListener('keydown', (e) => { if (e.key === 'Enter') send('follow-lastfm', { text: $('#follow-lastfm-user').value }); });
-      $('#follow-stop').addEventListener('click', () => send('follow-stop'));
 
       select('general');
       send('ready');

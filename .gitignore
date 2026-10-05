@@ -10,3 +10,12 @@ node_modules/
 /tsconfig.json
 /tsconfig.node.json
 /vite.config.ts
+
+# Secrets and local env files (this repo is public)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx

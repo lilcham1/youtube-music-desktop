@@ -61,11 +61,9 @@
           discord.classList.toggle('enabled', Boolean(s.discordEnabled));
           if (document.activeElement !== volume && Number.isFinite(Number(s.volume))) volume.value = String(s.volume);
           const listenMode = s.listen?.mode || '';
-          const follow = s.follow || {};
-          listenButton.classList.toggle('enabled', listenMode !== '' || Boolean(follow.mode));
-          listenButton.title = listenMode === 'host' ? 'Listen along: hosting'
+          listenButton.classList.toggle('enabled', listenMode !== '');
+          listenButton.title = listenMode === 'host' ? (s.listen?.auto ? 'Listen along: friends can join from your Discord status' : 'Listen along: hosting')
             : listenMode === 'guest' ? 'Listen along: following'
-            : follow.mode ? `Following ${follow.name} ${follow.mode === 'lastfm' ? 'on Last.fm' : 'on Spotify'}`
             : 'Listen along';
           miniButton.classList.toggle('enabled', Boolean(s.miniOpen));
           maximized = Boolean(s.maximized);

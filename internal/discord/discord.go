@@ -24,6 +24,9 @@ const (
 
 	ioTimeout      = 5 * time.Second
 	youtubeIconURL = "https://music.youtube.com/img/favicon_144.png"
+	// The small badge on the status shows which app is playing.
+	encoreIconURL = "https://lilcham1.github.io/youtube-music-desktop/img/encore-icon-256.png"
+	encoreName    = "Encore for YouTube Music"
 )
 
 // Dialer opens a connection to one IPC pipe. Replaced in tests.
@@ -126,8 +129,8 @@ func BuildActivity(t Track) map[string]any {
 	}
 	assets := map[string]any{
 		"large_image": artwork,
-		"small_image": youtubeIconURL,
-		"small_text":  "YouTube Music",
+		"small_image": encoreIconURL,
+		"small_text":  encoreName,
 	}
 	// Single releases often use the song title as the album title; skip the
 	// duplicate line in that case.

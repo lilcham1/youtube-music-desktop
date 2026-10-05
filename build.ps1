@@ -17,13 +17,6 @@ if ($LASTEXITCODE) { throw 'go-winres failed' }
 
 New-Item -ItemType Directory -Force dist | Out-Null
 $ldflags = "-H windowsgui -s -w -X main.version=$Version -X main.updatesEnabled=true"
-# The app's own Last.fm API account (optional; users can add their own).
-if ($env:LASTFM_API_KEY -and $env:LASTFM_SHARED_SECRET) {
-  $ldflags += " -X main.lastfmAPIKey=$env:LASTFM_API_KEY -X main.lastfmAppSecret=$env:LASTFM_SHARED_SECRET"
-  Write-Host 'Including the Last.fm API account'
-} else {
-  Write-Host 'No LASTFM_API_KEY/LASTFM_SHARED_SECRET: users add their own Last.fm API account'
-}
 go build -trimpath -ldflags $ldflags -o "dist\Encore.exe" .
 if ($LASTEXITCODE) { throw 'go build failed' }
 

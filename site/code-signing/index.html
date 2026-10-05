@@ -49,22 +49,19 @@
       <p>Contributions from others are reviewed by a committer before they are merged.</p>
 
       <h2 id="privacy">Privacy</h2>
-      <p>Encore has no accounts, analytics, telemetry or ads, and its developer receives no data from it. Settings and sign-ins are stored only on your PC, in <code>%USERPROFILE%\.youtube-music</code>; saved secrets (API keys, the Discord bot token) are encrypted with Windows DPAPI for your Windows account.</p>
+      <p>Encore has no accounts, analytics, telemetry or ads, and its developer receives no data from it. Settings and sign-ins are stored only on your PC, in <code>%USERPROFILE%\.youtube-music</code>.</p>
       <p>The app connects to these services, and only these:</p>
       <div class="wrap-table">
         <table>
           <tr><th>Service</th><th>When</th><th>What is sent</th></tr>
-          <tr><td>YouTube Music (Google)</td><td>Always: the app shows music.youtube.com</td><td>What any browser sends to YouTube Music, under Google's privacy policy. To match songs for Spotify features, song titles and artists are searched on YouTube Music.</td></tr>
+          <tr><td>YouTube Music (Google)</td><td>Always: the app shows music.youtube.com</td><td>What any browser sends to YouTube Music, under Google's privacy policy.</td></tr>
           <tr><td>GitHub</td><td>At startup, then every 4 hours</td><td>A request for the latest release, to offer updates; the installer is downloaded from GitHub when you update.</td></tr>
-          <tr><td>Discord (on your PC)</td><td>When Discord status is on</td><td>The current song, artist, album, artwork and timer, to the Discord app running on your PC, which shows it on your profile.</td></tr>
-          <tr><td>Discord (online)</td><td>When you set up your own bot to follow friends</td><td>Your bot's token, to connect your bot; the bot receives the statuses of people in servers you added it to.</td></tr>
-          <tr><td>ntfy.sh</td><td>While you host or join a listen-along session</td><td>Playback updates (song, position, paused or playing), end-to-end encrypted with a key that only exists in your session code. ntfy.sh can't read them.</td></tr>
-          <tr><td>Last.fm</td><td>When you connect Last.fm or follow someone there</td><td>Songs you play (scrobbles), or the username you follow.</td></tr>
-          <tr><td>Spotify</td><td>When you play a Spotify playlist</td><td>The playlist link, to read its songs.</td></tr>
+          <tr><td>Discord (on your PC)</td><td>When Discord status is on</td><td>The current song, artist, album, artwork and timer, plus the “Listen along” and “Get Encore” links, to the Discord app running on your PC, which shows them on your profile.</td></tr>
+          <tr><td>ntfy.sh</td><td>While you host or join a listen-along session. With the Discord “Listen along” button on, your session waits for listeners and sends nothing until a friend joins.</td><td>Playback updates (song, position, paused or playing), and a check-in from each listener every 10 minutes, end-to-end encrypted with a key that only exists in your session code. ntfy.sh can't read them.</td></tr>
         </table>
       </div>
       <p>The app doesn't transfer information to any other networked system unless you ask it to.</p>
-      <p style="margin-top:32px;color:#77777f;font-size:13px">Not affiliated with Google, YouTube, Spotify, Discord or Last.fm. YouTube Music is a trademark of Google LLC.</p>
+      <p style="margin-top:32px;color:#77777f;font-size:13px">Not affiliated with Google, YouTube or Discord. YouTube Music is a trademark of Google LLC.</p>
     </main>
   </body>
 </html>

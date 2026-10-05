@@ -21,10 +21,6 @@ type inbound struct {
 	Edge     string          `json:"edge"`
 	Text     string          `json:"text"`
 	Name     string          `json:"name"`
-	Key      string          `json:"key"`
-	Secret   string          `json:"secret"`
-	Flag     *bool           `json:"flag"`
-	Version  string          `json:"clientVersion"`
 	Settings json.RawMessage `json:"settings"`
 	Playback
 }
@@ -57,15 +53,14 @@ func (d *desktop) onPlayerMessage(msg inbound) {
 	case "ready":
 		d.applyPlayerVolume(true)
 		d.mu.Lock()
-		if msg.Version != "" {
-			d.ytVersion = msg.Version
-		}
 		d.playerReady = true
 		join := d.pendingJoin
 		d.pendingJoin = ""
 		d.mu.Unlock()
 		if join != "" {
 			go d.joinFromLink(join)
+		} else {
+			go d.listen.ensureAuto()
 		}
 	case "open-external":
 		d.openExternal(msg.URL)
@@ -158,45 +153,22 @@ func (d *desktop) onSettingsMessage(msg inbound) {
 		}
 	case "save":
 		d.saveGeneral(msg.Settings)
-	case "lastfm-save":
-		d.scrobbler.saveCredentials(msg.Key, msg.Secret)
-	case "lastfm-connect":
-		go d.scrobbler.connect()
-	case "lastfm-disconnect":
-		d.scrobbler.disconnect()
-	case "lastfm-enable":
-		if msg.Flag != nil {
-			d.scrobbler.setEnabled(*msg.Flag)
-		}
-	case "spotify-save":
-		d.queue.saveCredentials(msg.Key, msg.Secret)
-	case "spotify-play":
-		go d.queue.play(msg.URL)
-	case "spotify-stop":
-		d.queue.stop("Stopped.")
 	case "listen-host":
 		d.listen.Host()
 	case "listen-join":
 		go d.listen.Join(msg.Text)
 	case "listen-stop":
-		d.listen.Stop()
-	case "bot-save":
-		go d.follow.saveBotToken(msg.Secret)
-	case "follow-discord":
-		go d.follow.FollowDiscord(msg.Key)
-	case "follow-lastfm":
-		go d.follow.FollowLastfm(msg.Text)
-	case "follow-stop":
-		d.follow.stop("Stopped following.")
+		go d.listen.StopByUser()
 	}
 }
 
 func (d *desktop) saveGeneral(raw json.RawMessage) {
 	var next struct {
-		DiscordEnabled   *bool `json:"discordEnabled"`
-		MinimizeToTray   *bool `json:"minimizeToTray"`
-		CloseToTray      *bool `json:"closeToTray"`
-		StartWithWindows *bool `json:"startWithWindows"`
+		DiscordEnabled     *bool `json:"discordEnabled"`
+		DiscordListenAlong *bool `json:"discordListenAlong"`
+		MinimizeToTray     *bool `json:"minimizeToTray"`
+		CloseToTray        *bool `json:"closeToTray"`
+		StartWithWindows   *bool `json:"startWithWindows"`
 	}
 	if json.Unmarshal(raw, &next) != nil {
 		return
@@ -204,6 +176,9 @@ func (d *desktop) saveGeneral(raw json.RawMessage) {
 	cfg := d.update(func(s *settings.Settings) {
 		if next.DiscordEnabled != nil {
 			s.DiscordEnabled = *next.DiscordEnabled
+		}
+		if next.DiscordListenAlong != nil {
+			s.DiscordListenAlong = *next.DiscordListenAlong
 		}
 		if next.MinimizeToTray != nil {
 			s.MinimizeToTray = *next.MinimizeToTray
@@ -221,6 +196,12 @@ func (d *desktop) saveGeneral(raw json.RawMessage) {
 		}
 	}
 	d.presence.Configure(cfg.DiscordEnabled, cfg.DiscordAppID)
+	if next.DiscordListenAlong != nil {
+		d.listen.autoSettingChanged()
+	}
+	if next.DiscordEnabled != nil || next.DiscordListenAlong != nil {
+		go d.listen.ensureAuto()
+	}
 	d.pushAllState()
 }
 

@@ -41,9 +41,9 @@ func TestJoinCodeFromArgs(t *testing.T) {
 
 func TestSentence(t *testing.T) {
 	for in, want := range map[string]string{
-		"that doesn't look like a Spotify playlist link": "That doesn't look like a Spotify playlist link.",
-		"Already a sentence.":                            "Already a sentence.",
-		"élan":                                           "Élan.",
+		"that code doesn't look right": "That code doesn't look right.",
+		"Already a sentence.":          "Already a sentence.",
+		"élan":                         "Élan.",
 	} {
 		if got := sentence(errors.New(in)); got != want {
 			t.Errorf("sentence(%q) = %q; want %q", in, got, want)
