@@ -5,9 +5,9 @@
 <p align="center">A free, tiny Windows app for YouTube Music that lets you listen together with friends.</p>
 
 <p align="center">
-  <a href="https://lilcham1.github.io/youtube-music-desktop/"><b>Download for Windows</b></a> ·
+  <a href="https://lilxcham.com/youtube-music-desktop/"><b>Download for Windows</b></a> ·
   <a href="https://github.com/lilcham1/youtube-music-desktop/releases/latest">Latest release</a> ·
-  <a href="https://lilcham1.github.io/youtube-music-desktop/#faq">FAQ</a>
+  <a href="https://lilxcham.com/youtube-music-desktop/#faq">FAQ</a>
 </p>
 
 <p align="center"><img src="site/img/encore-main.png" alt="Encore playing a song, with the queue on the right and the player bar at the bottom"></p>
@@ -29,9 +29,9 @@ Written in Go with [Wails v3](https://v3.wails.io/) on Windows' built-in WebView
 
 ## Install
 
-Download the installer from the [download page](https://lilcham1.github.io/youtube-music-desktop/) and run it. It installs for your Windows account only (no administrator rights) and replaces earlier "YouTube Music" versions of this app, keeping your settings and sign-in.
+Download the installer from the [download page](https://lilxcham.com/youtube-music-desktop/) and run it. It installs for your Windows account only (no administrator rights) and replaces earlier "YouTube Music" versions of this app, keeping your settings and sign-in.
 
-The installer isn't code-signed yet (free signing for open-source projects has been requested), so Windows may say "Windows protected your PC": select **More info → Run anyway**. Releases are built by GitHub Actions from this repository; see the [code signing policy and privacy details](https://lilcham1.github.io/youtube-music-desktop/code-signing/).
+The installer isn't code-signed yet (free signing for open-source projects has been requested), so Windows may say "Windows protected your PC": select **More info → Run anyway**. Releases are built by GitHub Actions from this repository; see the [code signing policy and privacy details](https://lilxcham.com/youtube-music-desktop/code-signing/).
 
 ## Requirements
 

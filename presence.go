@@ -58,7 +58,7 @@ type presence struct {
 const minActivityInterval = 2 * time.Second
 
 // downloadPage is where the "Get Encore" button on the status leads.
-const downloadPage = "https://lilcham1.github.io/youtube-music-desktop/"
+const downloadPage = "https://lilxcham.com/youtube-music-desktop/"
 
 func newPresence(onStatus func(string)) *presence {
 	p := &presence{

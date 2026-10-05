@@ -25,7 +25,7 @@ const (
 	ioTimeout      = 5 * time.Second
 	youtubeIconURL = "https://music.youtube.com/img/favicon_144.png"
 	// The small badge on the status shows which app is playing.
-	encoreIconURL = "https://lilcham1.github.io/youtube-music-desktop/img/encore-icon-256.png"
+	encoreIconURL = "https://lilxcham.com/youtube-music-desktop/img/encore-icon-256.png"
 	encoreName    = "Encore for YouTube Music"
 )
 

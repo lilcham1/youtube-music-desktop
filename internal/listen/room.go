@@ -23,7 +23,7 @@ const (
 	// JoinPage is the web page a Discord "Listen along" button opens. It
 	// hands the code (kept in the URL fragment, never sent to a server) to
 	// the app through the ytm-desktop:// link.
-	JoinPage = "https://lilcham1.github.io/youtube-music-desktop/join/"
+	JoinPage = "https://lilxcham.com/youtube-music-desktop/join/"
 	// Scheme is the app's link scheme, registered by the installer.
 	Scheme = "ytm-desktop"
 )

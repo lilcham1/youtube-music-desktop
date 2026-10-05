@@ -121,7 +121,7 @@ Section "Install"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\${EXE}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "lilcham1"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "URLInfoAbout" "https://lilcham1.github.io/youtube-music-desktop/"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "URLInfoAbout" "https://lilxcham.com/youtube-music-desktop/"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\${UNINSTALLER}"'
   WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '"$INSTDIR\${UNINSTALLER}" /S'
