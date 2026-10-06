@@ -4,7 +4,6 @@
 //    scroll directions. Parts arriving together are staggered through --d (step from --stagger); --dir is
 //    -1 for parts that left through the top, so they come back down into place when scrolling up.
 //  - Reveals start once the opening veil lifts; any wheel, key or tap skips the opening.
-//  - The mouse wheel glides instead of jumping. Touch, keyboard, scrollbar and links stay native.
 (function () {
   var root = document.documentElement;
   root.setAttribute('data-reveal-ready', '');
@@ -46,39 +45,4 @@
     root.classList.add('intro-skip'); clearTimeout(introTimer); startReveals();
   }
   if (intro) INPUT.forEach(function (t) { addEventListener(t, skipIntro, { passive: true }); });
-})();
-
-(function () {
-  if (matchMedia('(pointer: coarse)').matches) return;
-  var root = document.documentElement, target = scrollY, raf = 0, ours = false, lastStep = 0;
-  function maxY() { return root.scrollHeight - innerHeight; }
-  function canScroll(el, dy) { // let an inner scroll area take the wheel while it still can move that way
-    for (; el && el !== document.body && el !== root; el = el.parentElement) {
-      var oy = getComputedStyle(el).overflowY;
-      if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1 &&
-          (dy > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0)) return true;
-    }
-    return false;
-  }
-  function step(n) {
-    // ease toward the target by elapsed time, not per frame, so the glide feels the same at any refresh rate
-    var dt = lastStep && n ? Math.min(.05, (n - lastStep) / 1000) : 1 / 60; lastStep = n || 0;
-    var y = scrollY, next = y + (target - y) * (1 - Math.pow(1 - .16, dt * 60));
-    if (Math.abs(target - next) < .6) next = target;
-    ours = true; scrollTo({ top: next, behavior: 'instant' });
-    raf = next === target ? 0 : requestAnimationFrame(step);
-    if (!raf) lastStep = 0;
-  }
-  addEventListener('wheel', function (e) {
-    if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || canScroll(e.target, e.deltaY)) return;
-    e.preventDefault();
-    var dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? innerHeight : 1);
-    if (!raf) target = scrollY;
-    target = Math.max(0, Math.min(maxY(), target + dy));
-    if (!raf) raf = requestAnimationFrame(step);
-  }, { passive: false });
-  addEventListener('scroll', function () { if (ours) { ours = false; return; } if (!raf) target = scrollY; }, { passive: true });
-  document.addEventListener('click', function (e) {
-    if (e.target.closest && e.target.closest('a[href^="#"]') && raf) { cancelAnimationFrame(raf); raf = 0; lastStep = 0; }
-  }, true);
 })();
