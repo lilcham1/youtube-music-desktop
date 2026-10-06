@@ -1,0 +1,98 @@
+/* Encore: "beat". The page opens with the icon pulsing to a beat and a ripple that opens outward, a small
+   equalizer bounces by the logo, cards land on the beat, bullets pulse, and the size bars grow.
+   Everything that moves is under html.motion, which the head script sets once motion.js can run; a
+   pure-CSS opening veil always ends by itself. motion.js adds .in as parts scroll into view (both ways),
+   --d staggers parts that arrive together, and --dir is -1 for parts coming back in from above. */
+body { --stagger: .14; --beat: cubic-bezier(.3, 1.5, .5, 1); }
+
+/* equalizer by the logo (decoration) */
+.eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; margin-left: 2px; }
+.eq i { width: 3px; height: 40%; border-radius: 2px; background: linear-gradient(var(--accent-a), var(--accent-b)); }
+
+/* opening veil: hidden unless motion is on */
+.intro { display: none; }
+@property --hole { syntax: '<length-percentage>'; inherits: false; initial-value: 0%; }
+html.motion .intro {
+  display: grid; place-items: center; position: fixed; inset: 0; z-index: 100; pointer-events: none;
+  background: radial-gradient(60% 50% at 50% 50%, #2a0f18, var(--bg));
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent var(--hole), #000 calc(var(--hole) + 1px));
+  mask-image: radial-gradient(circle at 50% 50%, transparent var(--hole), #000 calc(var(--hole) + 1px));
+  animation: en-ripple .7s cubic-bezier(.6, 0, .3, 1) .95s both;
+}
+html.intro-skip .intro { display: none; }
+.intro-beat { position: relative; display: grid; place-items: center; width: 96px; height: 96px; }
+.intro-beat img { width: 88px; height: 88px; position: relative; z-index: 1; }
+.intro-beat i { position: absolute; inset: 4px; border-radius: 26px; border: 2px solid var(--accent-a); opacity: 0; }
+html.motion .intro-beat img { animation: en-thump .45s var(--beat) both, en-thump .45s var(--beat) .45s, en-gone .3s ease-in .95s both; }
+html.motion .intro-beat i { animation: en-wave .9s ease-out both; }
+html.motion .intro-beat i:nth-child(2) { animation-delay: .45s; }
+
+@keyframes en-ripple { to { --hole: 150%; visibility: hidden; } }
+@keyframes en-thump { 0% { transform: scale(.7); opacity: 0; } 35% { transform: scale(1.12); opacity: 1; } 100% { transform: none; opacity: 1; } }
+@keyframes en-gone { to { opacity: 0; transform: scale(1.4); } }
+@keyframes en-wave { 0% { opacity: .8; transform: scale(1); } 100% { opacity: 0; transform: scale(2.4); } }
+@keyframes en-eq { 0%, 100% { height: 30%; } 50% { height: 100%; } }
+@keyframes en-rise { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+@keyframes en-shimmer { from { background-position: 0% 50%; } to { background-position: 200% 50%; } }
+@keyframes en-ping { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-a) 60%, transparent); } to { box-shadow: 0 0 0 10px transparent; } }
+@keyframes en-glow { 0%, 100% { box-shadow: 0 8px 30px #e0245e44; } 50% { box-shadow: 0 8px 46px #e0245e88; } }
+
+html.motion .eq i { animation: en-eq .9s ease-in-out infinite; }
+html.motion .eq i:nth-child(2) { animation-duration: .7s; animation-delay: -.2s; }
+html.motion .eq i:nth-child(3) { animation-duration: 1.1s; animation-delay: -.5s; }
+html.motion .eq i:nth-child(4) { animation-duration: .8s; animation-delay: -.35s; }
+
+/* hero: plays each time it comes on screen (motion.js gives the hero .in) */
+html.motion .hero:not(.in) :is(img.icon, h1, .lead, .cta, .meta) { opacity: 0; }
+html.motion .hero.in :is(img.icon, h1, .lead, .cta, .meta) { animation: en-rise .7s var(--beat) both; }
+html.motion .hero.in img.icon { animation-name: en-thump; animation-duration: .6s; }
+html.motion .hero.in h1 { animation-delay: .12s; }
+html.motion .hero.in .lead { animation-delay: .24s; }
+html.motion .hero.in .cta { animation-delay: .36s; }
+html.motion .hero.in .meta { animation-delay: .46s; }
+html.motion .grad { background-size: 200% 100%; background-image: linear-gradient(90deg, var(--accent-a), var(--accent-b), #ffb38a, var(--accent-a)); animation: en-shimmer 6s linear infinite; }
+
+/* the screenshot floats up */
+html.motion .shot { opacity: 0; transform: translateY(calc(var(--dir, 1) * 40px)) scale(.96); transition: opacity .9s ease-out, transform 1.1s cubic-bezier(.2, .8, .2, 1); }
+html.motion .shot.in { opacity: 1; transform: none; }
+
+/* everything else rises in; cards land on the beat */
+html.motion section h2, html.motion section .sub, html.motion details, html.motion .final .wrap > * {
+  opacity: 0; transform: translateY(calc(var(--dir, 1) * 16px));
+  transition: opacity .55s ease-out var(--d, 0s), transform .6s cubic-bezier(.2, .8, .2, 1) var(--d, 0s);
+}
+html.motion .card {
+  opacity: 0; transform: translateY(calc(var(--dir, 1) * 22px)) scale(.9);
+  transition: opacity .45s ease-out var(--d, 0s), transform .6s var(--beat) var(--d, 0s), border-color .25s;
+}
+html.motion .card.in h3 .ico { animation: en-ping .9s ease-out calc(var(--d, 0s) + .3s) 2; }
+html.motion .card:hover { border-color: color-mix(in srgb, var(--accent-a) 45%, var(--line)); }
+
+/* list bullets pulse as each line comes in; the mini player slides in from the side */
+ul.ticks li::after { content: ""; position: absolute; left: 0; top: .45em; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--accent-a); opacity: 0; pointer-events: none; }
+html.motion ul.ticks li { opacity: 0; transform: translateX(-12px); transition: opacity .45s ease-out var(--d, 0s), transform .45s ease-out var(--d, 0s); }
+@keyframes en-dot { from { transform: scale(1); opacity: .9; } to { transform: scale(2.4); opacity: 0; } }
+html.motion ul.ticks li.in::after { animation: en-dot .8s ease-out calc(var(--d, 0s) + .15s); }
+html.motion .split img { opacity: 0; transform: translateX(calc(var(--dir, 1) * 40px)); transition: opacity .8s ease-out .2s, transform .9s cubic-bezier(.2, .8, .2, 1) .2s; }
+
+/* the size bars grow: Encore's tiny bar first, then the long one */
+html.motion .size .fill { transform: scaleX(0); transform-origin: 0 50%; transition: transform 1.4s cubic-bezier(.2, .8, .2, 1) .5s; }
+html.motion .size .bar.me .fill { transition-duration: .6s; transition-delay: .2s; }
+html.motion .size { opacity: 0; transition: opacity .5s ease-out; }
+html.motion .size.in, html.motion .size.in .fill { opacity: 1; transform: none; }
+
+/* final call to action glows to the beat */
+html.motion .final .btn.primary { animation: en-glow 1.6s ease-in-out infinite; }
+
+/* shown state for everything above */
+html.motion .in, html.motion section h2.in, html.motion section .sub.in, html.motion .final .wrap > .in,
+html.motion ul.ticks li.in, html.motion .split img.in { opacity: 1; transform: none; }
+
+/* FAQ answers slide open */
+html.motion details summary::after { display: inline-block; transition: transform .3s var(--beat); }
+html.motion details[open] summary::after { content: "+"; transform: rotate(45deg); }
+@supports (interpolate-size: allow-keywords) {
+  html.motion { interpolate-size: allow-keywords; }
+  html.motion details::details-content { block-size: 0; overflow: hidden; transition: block-size .35s ease, content-visibility .35s allow-discrete; }
+  html.motion details[open]::details-content { block-size: auto; }
+}

@@ -102,11 +102,21 @@
         .hero { padding-top: 48px; }
       }
     </style>
+    <link rel="stylesheet" href="motion.css" />
+    <script>
+      // Animations start hidden, so switch them on only when motion.js can run; if it never reports in,
+      // show everything rather than leave parts of the page invisible.
+      if (window.IntersectionObserver) {
+        document.documentElement.classList.add('motion');
+        addEventListener('load', function () { setTimeout(function () { if (!document.documentElement.hasAttribute('data-reveal-ready')) document.documentElement.classList.remove('motion'); }, 800); });
+      }
+    </script>
   </head>
   <body>
+    <div class="intro" aria-hidden="true"><div class="intro-beat"><i></i><i></i><img src="img/encore-icon.svg" alt="" /></div></div>
     <header>
       <div class="wrap">
-        <a class="logo" href="#"><img src="img/encore-icon.svg" alt="" />Encore</a>
+        <a class="logo" href="#"><img src="img/encore-icon.svg" alt="" />Encore<span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span></a>
         <nav>
           <a href="#features">Features</a>
           <a class="hide-sm" href="#together">Listen together</a>
@@ -255,5 +265,6 @@
         })
         .catch(() => {});
     </script>
+    <script src="motion.js"></script>
   </body>
 </html>
