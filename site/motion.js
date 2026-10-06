@@ -63,7 +63,7 @@
   function step(n) {
     // ease toward the target by elapsed time, not per frame, so the glide feels the same at any refresh rate
     var dt = lastStep && n ? Math.min(.05, (n - lastStep) / 1000) : 1 / 60; lastStep = n || 0;
-    var y = scrollY, next = y + (target - y) * (1 - Math.pow(1 - .085, dt * 60));
+    var y = scrollY, next = y + (target - y) * (1 - Math.pow(1 - .16, dt * 60));
     if (Math.abs(target - next) < .6) next = target;
     ours = true; scrollTo({ top: next, behavior: 'instant' });
     raf = next === target ? 0 : requestAnimationFrame(step);
