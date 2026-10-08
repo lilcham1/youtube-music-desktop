@@ -102,11 +102,21 @@
         .hero { padding-top: 48px; }
       }
     </style>
+    <link rel="stylesheet" href="motion.css" />
+    <script>
+      // Animations start hidden, so switch them on only when motion.js can run; if it never reports in,
+      // show everything rather than leave parts of the page invisible.
+      if (window.IntersectionObserver) {
+        document.documentElement.classList.add('motion');
+        addEventListener('load', function () { setTimeout(function () { if (!document.documentElement.hasAttribute('data-reveal-ready')) document.documentElement.classList.remove('motion'); }, 800); });
+      }
+    </script>
   </head>
   <body>
+    <div class="intro" aria-hidden="true"><div class="intro-beat"><i></i><i></i><img src="img/encore-icon.svg" alt="" /></div></div>
     <header>
       <div class="wrap">
-        <a class="logo" href="#"><img src="img/encore-icon.svg" alt="" />Encore</a>
+        <a class="logo" href="#"><img src="img/encore-icon.svg" alt="" />Encore<span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span></a>
         <nav>
           <a href="#features">Features</a>
           <a class="hide-sm" href="#together">Listen together</a>
@@ -237,7 +247,7 @@
     <footer>
       <div class="wrap">
         <span>Encore is open source under the <a href="https://github.com/lilcham1/youtube-music-desktop/blob/main/LICENSE">GPL-3.0</a>. Not affiliated with Google or YouTube. YouTube Music is a trademark of Google LLC.</span>
-        <span><a href="code-signing/">Code signing &amp; privacy</a> · <a href="https://github.com/lilcham1/youtube-music-desktop/releases">All releases</a></span>
+        <span><a href="code-signing/">Code signing &amp; privacy</a> · <a href="terms/">Terms</a> · <a href="https://github.com/lilcham1/youtube-music-desktop/releases">All releases</a> · <a href="mailto:lilxcham@proton.me">lilxcham@proton.me</a></span>
       </div>
     </footer>
 
@@ -255,5 +265,6 @@
         })
         .catch(() => {});
     </script>
+    <script src="motion.js"></script>
   </body>
 </html>
