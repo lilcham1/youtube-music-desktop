@@ -37,19 +37,35 @@
     }
     return '';
   };
+  // When a song ends on its own, YouTube Music may go straight into the next
+  // one in the same video stream: no ended/loadedmetadata/playing events,
+  // and the <video> clock keeps counting across songs. So the song's
+  // position and length come from the player's own per-song data, and a
+  // light check (watchTrack) notices a new song by what it is.
+  let change = { id: '', title: '', at: 0 };
   const trackDetails = () => {
+    const mp = document.querySelector('#movie_player');
+    const data = mp?.getVideoData?.() || {};
+    const videoId = data.video_id || '';
     const metadata = navigator.mediaSession?.metadata;
     const video = document.querySelector('video') || findInTree('video');
+    // Right after a change the media session can still describe the previous
+    // song; until it updates (or a few seconds pass) use the player's data.
+    if (videoId !== change.id) change = { id: videoId, title: metadata?.title || '', at: Date.now() };
+    const stale = Boolean(metadata && data.title && metadata.title === change.title
+      && metadata.title !== data.title && Date.now() - change.at < 5000);
+    const position = mp?.getCurrentTime?.();
+    const length = Number(mp?.getPlayerResponse?.()?.videoDetails?.lengthSeconds);
     return {
-      videoId: document.querySelector('#movie_player')?.getVideoData?.()?.video_id || '',
+      videoId,
       playing: Boolean(video && !video.paused && !video.ended && video.readyState > 2),
-      title: metadata?.title || pageText('#song-title', '.title.ytmusic-player-bar')
-        || document.title.replace(/\s*[-–|]\s*YouTube Music.*$/i, '').trim(),
-      artist: metadata?.artist || pageText('#byline', '.byline.ytmusic-player-bar'),
-      album: metadata?.album || '',
-      artwork: metadata?.artwork?.[metadata.artwork.length - 1]?.src || '',
-      positionSeconds: video?.currentTime || 0,
-      durationSeconds: Number.isFinite(video?.duration) ? video.duration : 0,
+      title: (stale ? data.title : metadata?.title) || pageText('#song-title', '.title.ytmusic-player-bar')
+        || data.title || document.title.replace(/\s*[-–|]\s*YouTube Music.*$/i, '').trim(),
+      artist: (stale ? data.author : metadata?.artist) || pageText('#byline', '.byline.ytmusic-player-bar'),
+      album: (!stale && metadata?.album) || '',
+      artwork: (!stale && metadata?.artwork?.[metadata.artwork.length - 1]?.src) || '',
+      positionSeconds: Number.isFinite(position) ? position : (video?.currentTime || 0),
+      durationSeconds: length > 0 ? length : (Number.isFinite(video?.duration) ? video.duration : 0),
     };
   };
 
@@ -66,6 +82,16 @@
   const schedulePlaybackReport = () => {
     clearTimeout(reportTimer);
     reportTimer = setTimeout(reportPlayback, 100);
+  };
+  // Reports when the song itself (or its details) changes without a media
+  // event; position alone is left to the events (seeks) so this stays quiet.
+  let lastTrack = '';
+  const watchTrack = () => {
+    const t = trackDetails();
+    const track = [t.videoId, t.title, t.artist, t.album, t.artwork, Math.round(t.durationSeconds), t.playing].join('\n');
+    if (track === lastTrack) return;
+    lastTrack = track;
+    schedulePlaybackReport();
   };
 
   // ---- Volume ----
@@ -142,6 +168,8 @@
       // Listen along: finish following once the host's song has loaded.
       ['loadedmetadata', 'playing'].forEach((event) => video.addEventListener(event, () => settleFollow(event)));
       video.addEventListener('volumechange', () => setTimeout(onVolumeChange, 0));
+      // A few times a second while playing: catches seamless song changes.
+      video.addEventListener('timeupdate', watchTrack);
     });
   };
 
@@ -282,5 +310,7 @@
   new MutationObserver(scheduleInstall).observe(document.documentElement, { childList: true, subtree: true });
   attachVideoEvents();
   schedulePlaybackReport();
+  // Song details can also change while paused (or before a video exists).
+  setInterval(watchTrack, 2000);
   send('ready');
 })();
