@@ -66,6 +66,11 @@ func (d *desktop) wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (uin
 	if d.shell == nil || hwnd != uintptr(d.shell.NativeWindow()) {
 		return 0, false
 	}
+	const wmQueryEndSession, wmEndSession = 0x0011, 0x0016
+	if msg == wmQueryEndSession || msg == wmEndSession {
+		d.sessionEnding.Store(true)
+		return 0, false
+	}
 	if msg == taskbar.ButtonCreatedMessage() {
 		if err := d.thumbs.Add(hwnd); err != nil {
 			log.Printf("taskbar buttons: %v", err)

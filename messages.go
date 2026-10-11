@@ -96,6 +96,8 @@ func (d *desktop) onShellMessage(msg inbound) {
 		d.openSettings("listen")
 	case "toggle-mini":
 		d.toggleMini()
+	case "install-update":
+		d.installUpdate()
 	case "drag":
 		// Wails starts the native move (and hops to the UI thread itself).
 		d.shell.HandleMessage("wails:drag")
@@ -146,11 +148,7 @@ func (d *desktop) onSettingsMessage(msg inbound) {
 	case "check-updates":
 		go d.updates.Check(context.Background())
 	case "install-update":
-		if d.updates.Status().State == updater.Downloaded {
-			if err := d.updates.Install(); err == nil {
-				d.quit()
-			}
-		}
+		d.installUpdate()
 	case "save":
 		d.saveGeneral(msg.Settings)
 	case "listen-host":
@@ -215,4 +213,16 @@ func (d *desktop) openExternal(raw string) {
 	if err := d.app.Browser.OpenURL(u.String()); err != nil {
 		log.Printf("open %s: %v", u, err)
 	}
+}
+
+// installUpdate restarts into a downloaded update.
+func (d *desktop) installUpdate() {
+	if d.updates.Status().State != updater.Downloaded {
+		return
+	}
+	if err := d.updates.Install(); err != nil {
+		log.Printf("installing the update: %v", err)
+		return
+	}
+	d.quit()
 }

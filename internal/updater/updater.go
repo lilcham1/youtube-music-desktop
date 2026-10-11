@@ -48,11 +48,14 @@ type Updater struct {
 	HTTP       *http.Client
 	DownloadTo string // directory for installers
 	OnStatus   func(Status)
+	// Launch starts the installer; tests replace it.
+	Launch func(path string, args ...string) error
 
 	mu        sync.Mutex
 	status    Status
 	installer string
 	busy      bool
+	launched  bool // the installer was started; never start it twice
 }
 
 func (u *Updater) Status() Status {
@@ -130,20 +133,41 @@ func (u *Updater) Check(ctx context.Context) Status {
 	u.mu.Lock()
 	u.installer = path
 	u.mu.Unlock()
-	u.set(Downloaded, fmt.Sprintf("Encore %s is ready to install.", latest))
+	u.set(Downloaded, fmt.Sprintf("Encore %s is ready. It installs when you quit Encore, or restart now.", latest))
 	return u.Status()
 }
 
-// Install launches the downloaded installer silently. The caller quits the
-// app afterwards so the installer can replace its files.
-func (u *Updater) Install() error {
+// Install launches the downloaded installer silently and has it start the
+// new version when done. The caller quits the app afterwards so the
+// installer can replace its files.
+func (u *Updater) Install() error { return u.launch("/S", "--run-after") }
+
+// InstallOnQuit installs a downloaded update while the app is quitting, so
+// it is in place the next time the app starts, without starting it now. It
+// reports whether an installer was started.
+func (u *Updater) InstallOnQuit() bool { return u.launch("/S") == nil }
+
+func (u *Updater) launch(args ...string) error {
 	u.mu.Lock()
-	path := u.installer
+	path, ready := u.installer, u.status.State == Downloaded && !u.launched
+	if ready && path != "" {
+		u.launched = true
+	}
 	u.mu.Unlock()
-	if path == "" {
+	if !ready || path == "" {
 		return errors.New("no update downloaded")
 	}
-	return exec.Command(path, "/S", "--run-after").Start()
+	start := u.Launch
+	if start == nil {
+		start = func(path string, args ...string) error { return exec.Command(path, args...).Start() }
+	}
+	if err := start(path, args...); err != nil {
+		u.mu.Lock()
+		u.launched = false
+		u.mu.Unlock()
+		return err
+	}
+	return nil
 }
 
 func (u *Updater) client() *http.Client {

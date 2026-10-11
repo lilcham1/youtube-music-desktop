@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -38,6 +39,8 @@ import (
 var (
 	version        = "0.2.0-dev"
 	updatesEnabled = "false"
+	// updateFeed can point a test build at a local release feed.
+	updateFeed = updater.DefaultFeed
 )
 
 const (
@@ -75,6 +78,10 @@ type desktop struct {
 	startHidden                bool
 	windowSaver, miniSaver     *debouncer
 	saveMu                     sync.Mutex // writes settings.json in the order changes were made
+	// sessionEnding is set when Windows signs out or shuts down; a
+	// downloaded update then waits, since Windows could stop the installer
+	// halfway.
+	sessionEnding atomic.Bool
 
 	mu          sync.Mutex
 	cfg         settings.Settings
@@ -157,11 +164,11 @@ func main() {
 	d.presence = newPresence(func(string) { d.pushSettingsState() })
 	d.presence.Configure(d.cfg.DiscordEnabled, d.cfg.DiscordAppID)
 	d.updates = &updater.Updater{
-		Feed:       updater.DefaultFeed,
+		Feed:       updateFeed,
 		Current:    strings.TrimSuffix(version, "-dev"),
 		Enabled:    updatesEnabled == "true",
 		DownloadTo: filepath.Join(os.TempDir(), "encore-update"),
-		OnStatus:   func(updater.Status) { d.pushSettingsState() },
+		OnStatus:   func(updater.Status) { d.pushAllState() },
 	}
 	d.listen = &listenAlong{d: d, relay: &listen.Relay{}}
 	d.windowSaver = newDebouncer(700*time.Millisecond, d.saveWindowState)
@@ -373,6 +380,10 @@ func (d *desktop) shutdown() {
 	d.miniSaver.Flush()
 	d.listen.Shutdown()
 	d.presence.Close()
+	// An update downloaded earlier installs now, so it is in place next time.
+	if !d.sessionEnding.Load() && d.updates.InstallOnQuit() {
+		log.Print("installing the downloaded update")
+	}
 	log.Print("shut down")
 }
 

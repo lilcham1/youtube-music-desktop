@@ -86,7 +86,7 @@ func TestCheckDownloadsAndVerifiesNewerRelease(t *testing.T) {
 	var states []State
 	u := &Updater{Feed: srv.URL + "/feed", Current: "0.2.0", Enabled: true, DownloadTo: t.TempDir(),
 		OnStatus: func(s Status) { states = append(states, s.State) }}
-	if s := u.Check(context.Background()); s.State != Downloaded || s.Message != "Encore 0.3.0 is ready to install." {
+	if s := u.Check(context.Background()); s.State != Downloaded || s.Message != "Encore 0.3.0 is ready. It installs when you quit Encore, or restart now." {
 		t.Fatalf("status = %+v (states %v)", s, states)
 	}
 	data, err := os.ReadFile(u.installer)
@@ -158,5 +158,44 @@ func TestCheckReportsUpToDateAndDevBuilds(t *testing.T) {
 	dev := &Updater{Current: "0.2.0"}
 	if s := dev.Check(context.Background()); s.State != Unavailable {
 		t.Fatalf("dev status = %+v", s)
+	}
+}
+
+func TestInstallOnQuitRunsOnceAndOnlyWhenDownloaded(t *testing.T) {
+	var runs [][]string
+	launch := func(path string, args ...string) error {
+		runs = append(runs, append([]string{path}, args...))
+		return nil
+	}
+	u := &Updater{Feed: "", Current: "0.2.0", Enabled: true, DownloadTo: t.TempDir(), Launch: launch}
+	if u.InstallOnQuit() || len(runs) != 0 {
+		t.Fatal("nothing to install before an update is downloaded")
+	}
+	payload := strings.Repeat("x", 1000)
+	srv := releaseServer(t, payload, payload, true)
+	u.Feed = srv.URL + "/feed"
+	if s := u.Check(context.Background()); s.State != Downloaded {
+		t.Fatalf("status = %+v", s)
+	}
+	if !u.InstallOnQuit() {
+		t.Fatal("a downloaded update installs on quit")
+	}
+	if len(runs) != 1 || runs[0][0] != u.installer || strings.Join(runs[0][1:], " ") != "/S" {
+		t.Fatalf("installer started as %v; on quit it must not start the app again", runs)
+	}
+	if u.InstallOnQuit() || u.Install() == nil || len(runs) != 1 {
+		t.Fatal("the installer is never started twice")
+	}
+
+	// Pressing "Restart and install" starts it with --run-after; quitting
+	// afterwards must not start it again.
+	runs = nil
+	v := &Updater{Feed: srv.URL + "/feed", Current: "0.2.0", Enabled: true, DownloadTo: t.TempDir(), Launch: launch}
+	v.Check(context.Background())
+	if err := v.Install(); err != nil || len(runs) != 1 || strings.Join(runs[0][1:], " ") != "/S --run-after" {
+		t.Fatalf("install: %v %v", err, runs)
+	}
+	if v.InstallOnQuit() || len(runs) != 1 {
+		t.Fatal("quitting after Install must not run the installer again")
 	}
 }
